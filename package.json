@@ -1,0 +1,28 @@
+{
+  "name": "rag-chatbot",
+  "version": "1.0.0",
+  "description": "ask me like I'm 5 - RAG chatbot that explains any topic in simple terms",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "rag",
+    "chatbot",
+    "eli5",
+    "ollama",
+    "chromadb",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chromadb": "^1.8.1",
+    "dotenv": "^16.4.5",
+    "https-proxy-agent": "^7.0.2",
+    "node-fetch": "^2.7.0",
+    "ollama": "^0.5.16",
+    "readline": "^1.3.0"
+  }
+}
