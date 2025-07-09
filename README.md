@@ -1,160 +1,277 @@
-# 🎉 ELI5 RAG Chatbot
+# RAG Chatbot v2
 
-**Ask Me Like I'm 5** - A RAG chatbot that explains any topic in simple terms using fresh web information!
+A sophisticated RAG-based chatbot system that researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
 
-## 🌟 What Makes This Special?
+## Features
 
-- **Fresh Information**: Searches the web for up-to-date information
-- **Kid-Friendly Explanations**: Makes complex topics super simple to understand  
-- **Any Topic**: Works with topics not in the AI's training data
-- **RAG Pipeline**: Retrieval-Augmented Generation with ChromaDB vector storage
-- **Interactive CLI**: Fun and easy to use interface
+- **Two-Phase Operation**: Research topics first, then engage in Q&A
+- **Comprehensive Topic Research**: Uses 20+ search templates for thorough coverage
+- **Local LLM Integration**: Powered by Ollama with Gemma models
+- **Vector Database Storage**: ChromaDB for efficient similarity search
+- **Intelligent Caching**: Reduces API calls and improves performance
+- **Topic Management**: Switch between different research topics
+- **Conversation History**: Maintains context during Q&A sessions
 
-## 🚀 Quick Start
+## 📋 Prerequisites
 
-### 1. Prerequisites
+1. **Node.js** (v16 or higher)
+2. **Ollama** installed and running locally
+3. **ChromaDB** (automatically handled by the chromadb package)
+4. **Bright Data SERP API** credentials
 
-Make sure you have these installed:
-- **Node.js** (v18 or higher)
-- **Ollama** (for local AI models)
-- **Bright Data account** (for web search)
+### Required Ollama Models
 
-### 2. Install Ollama Models
+The system will automatically attempt to pull these models if missing:
+- `gemma3:1b` (text generation)
+- `nomic-embed-text:latest` (embeddings)
 
-```bash
-# start Ollama service
-ollama serve
+## Installation
 
-# in another terminal, download required models
-ollama pull gemma3:4b
-ollama pull nomic-embed-text:latest
-```
+1. **Clone or navigate to the project directory**:
+   ```bash
+   cd rag-chatbot-v2
+   ```
 
-### 3. Setup Project
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-```bash
-# clone or create the project
-cd rag-chatbot
+3. **Set up environment variables**:
+   ```bash
+   cp env.example .env
+   ```
+   
+   Edit `.env` with your Bright Data credentials:
+   ```
+   BRIGHT_DATA_CUSTOMER_ID=your_customer_id
+   BRIGHT_DATA_ZONE=your_zone_name
+   BRIGHT_DATA_PASSWORD=your_zone_password
+   ```
 
-# install dependencies
-npm install
+4. **Start Ollama** (if not already running):
+   ```bash
+   ollama serve
+   ```
 
-# setup environment
-cp env.example .env
-# edit .env with your Bright Data credentials
-```
+## Usage
 
-### 4. Get Bright Data Credentials
-
-1. Sign up at [brightdata.com](https://brightdata.com)
-2. Create a SERP API zone
-3. Add credentials to your `.env` file:
-
-```env
-BRIGHT_DATA_CUSTOMER_ID=your_customer_id
-BRIGHT_DATA_ZONE=your_zone  
-BRIGHT_DATA_PASSWORD=your_password
-```
-
-### 5. Run the Chatbot
+### Starting the Chatbot
 
 ```bash
 npm start
+# or
+node main.js
 ```
 
-## 🎯 How It Works
+### Phase 1: Topic Ingestion
 
-Operates on the principle of Retrieval-Augmented Generation (RAG), combining information retrieval with AI-powered text generation to provide easy-to-understand answers.
+When you first start the chatbot, you'll be in **Topic Ingestion Mode**. Here you can:
 
-The chatbot's workflow begins when a user asks a question. The system first identifies the core topic of the query. It then initiates its retrieval phase by searching the web for fresh information using Bright Data's SERP API. To ensure comprehensive coverage, it dynamically creates multiple search queries from predefined templates (e.g., "topic explained simple," "topic beginner guide"). The search results are cached locally to speed up future requests on the same topic.
+1. **Research a new topic** by simply typing the topic name:
+   ```
+   enter topic to research (or command): ZLUDA
+   ```
 
-Once web content is retrieved, it is broken down into smaller, manageable chunks of text. These chunks are then converted into numerical representations, called embeddings, using a local nomic-embed-text model running via Ollama. These embeddings are stored and indexed in a ChromaDB vector database, creating a persistent knowledge base for the chatbot.
+2. The system will:
+   - Generate 20+ targeted search queries
+   - Fetch comprehensive data using Bright Data SERP API
+   - Process and chunk the content
+   - Generate embeddings using local models
+   - Store everything in ChromaDB
 
-When generating an answer, the user's question is also converted into an embedding. The system queries the ChromaDB database to find the most semantically relevant text chunks from its knowledge base. This retrieved context, along with the original question, is then passed to a gemma3:1b language model, also running on Ollama. A specialized prompt instructs the model to act as a friendly teacher, ensuring the final output is simple, concise, and avoids technical jargon.
+3. Once research is complete, you'll automatically switch to Chat Mode.
 
-The user interacts with the chatbot through a simple command-line interface, which displays the generated explanation, the sources used, and a confidence score. The application also includes commands to view statistics about its knowledge base, list the topics it has learned about, and instruct it to "forget" previously learned topics, providing a complete and interactive user experience.
+### Phase 2: Chat Mode
 
-## 🎮 Special Commands
-
-- `/help` - Show help message
-- `/stats` - View knowledge statistics  
-- `/topics` - List all topics you've learned
-- `/forget <topic>` - Remove a topic from memory
-- `/quit` - Exit the chatbot
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐
-│   Web Search    │───▶│   Chunking   │───▶│   Embeddings    │
-│  (Bright Data)  │    │  & Parsing   │    │   (Ollama)      │
-└─────────────────┘    └──────────────┘    └─────────────────┘
-                                                     │
-┌─────────────────┐    ┌──────────────┐              ▼
-│  ELI5 Response  │◀───│   Retrieval  │    ┌─────────────────┐
-│   (Gemma 3)     │    │ (Similarity) │    │   ChromaDB      │
-└─────────────────┘    └──────────────┘    │ Vector Storage  │
-                                           └─────────────────┘
-```
-
-## 📁 Project Structure
+In **Chat Mode**, you can ask any questions about the researched topic:
 
 ```
-rag-chatbot/
-├── main.js          # interactive CLI interface
-├── rag.js           # main RAG pipeline logic
-├── search.js        # web search and data gathering
-├── vectorstore.js   # ChromaDB vector operations
-├── ollama.js        # Ollama client and ELI5 generation
-├── config.js        # configuration settings
-├── package.json     # dependencies
-├── env.example      # environment template
-└── README.md        # this file!
+[ZLUDA] your question: What is ZLUDA and how does it work?
 ```
 
-## ⚙️ Configuration
+The system will:
+- Find the most relevant knowledge chunks
+- Generate a contextual answer using the local LLM
+- Provide source citations
+- Maintain conversation history
 
-Edit `config.js` to customize:
+## Commands
 
-- **Search templates**: Different query patterns for comprehensive coverage
-- **Chunk settings**: Size and overlap for text processing  
-- **Cache duration**: How long to keep search results
-- **Model settings**: Ollama model configurations
+### Available Commands
 
-## 🔧 Troubleshooting
+- **`list`**: Show all available topics in the knowledge base
+- **`stats <topic>`**: Display statistics for a specific topic
+- **`switch <topic>`**: Switch to Q&A mode for an existing topic
+- **`clear`**: Clear conversation history
+- **`back`**: Return to topic selection mode (when in chat)
+- **`quit`** or **`exit`**: Exit the chatbot
 
-**Models not found?**
-```bash
-ollama pull gemma3:4b
-ollama pull nomic-embed-text:latest
+### Example Session
+
+```
+enter topic to research (or command): Rust programming language
+
+starting research for topic: Rust programming language
+this may take a few minutes...
+
+searching for: what is Rust programming language?
+✅ found 10 organic results
+searching for: Rust programming language explained simply
+✅ found 8 organic results
+... (continues for all search templates)
+
+collected 156 total chunks for Rust programming language
+storing knowledge in vector database...
+✅ stored 156 chunks for topic: rust_programming_language
+✅ research complete for "Rust programming language"!
+collected 156 chunks from 12 sources
+switching to Q&A mode...
+
+now in Q&A mode for: Rust programming language
+ask me anything about this topic!
+
+[Rust programming language] your question: What makes Rust memory safe?
+
+thinking...
+
+answer:
+Rust achieves memory safety through its ownership system, which prevents common memory bugs like buffer overflows, use-after-free, and memory leaks. The key mechanisms include:
+
+1. **Ownership**: Each value has a single owner, and when the owner goes out of scope, the value is automatically deallocated.
+
+2. **Borrowing**: References that allow you to use a value without taking ownership, with compile-time checks to ensure references don't outlive the data they point to.
+
+3. **Lifetimes**: Annotations that ensure references are valid for as long as needed.
+
+These features are enforced at compile time, meaning memory safety violations are caught before the program runs, without requiring a garbage collector.
+
+sources:
+  • rust-lang.org
+  • doc.rust-lang.org
+  • github.com
+
+used 6 knowledge chunks
 ```
 
-**Ollama connection failed?**
-```bash
-ollama serve
+## Configuration
+
+The system is highly configurable through `config.js`:
+
+### Search Configuration
+- **Search Templates**: 20+ predefined query patterns for comprehensive research
+- **Results per Query**: Number of search results to fetch
+- **Request Delays**: Rate limiting between API calls
+
+### RAG Settings
+- **Chunk Size**: Optimal size for text chunks (default: 400 tokens)
+- **Context Length**: Maximum context for LLM generation
+- **Retrieved Chunks**: Number of chunks to use for answering
+
+### Caching
+- **Cache Directory**: Local cache storage location
+- **Expiry Time**: How long to keep cached search results
+
+## Project Structure
+
+```
+rag-chatbot-v2/
+├── main.js           # Main application and interaction loop
+├── config.js         # System configuration
+├── ollama.js         # Ollama client for local LLM
+├── search.js         # Bright Data SERP API integration
+├── vectorstore.js    # ChromaDB vector database operations
+├── rag.js           # RAG system for Q&A
+├── cache.js         # Caching functionality
+├── utils.js         # Utility functions
+├── package.json     # Dependencies and scripts
+├── .gitignore       # Git ignore patterns
+├── env.example      # Environment variables template
+└── README.md        # This file
 ```
 
-**Search not working?**
-- Check your Bright Data credentials in `.env`
-- Verify your account has SERP API access
+## How It Works
 
-**ChromaDB issues?**
-- Delete `chroma_db/` folder to reset vector database
-- Restart the application
+### Topic Research Process
 
-## 🎨 Customization Ideas
+1. **Query Generation**: Uses predefined templates to create comprehensive search queries
+2. **Data Fetching**: Retrieves search results via Bright Data SERP API
+3. **Content Processing**: Extracts and chunks relevant information
+4. **Embedding Generation**: Creates vector embeddings using local models
+5. **Storage**: Stores chunks in topic-specific ChromaDB collections
 
-- Try other Ollama models like `llama3` or `mistral`
-- Focus on specific domains (science, technology, etc.)
-- Add text-to-speech for audio explanations
-- Build a web UI instead of CLI
+### Question Answering Process
 
-## 📝 License
+1. **Query Embedding**: Converts user question to vector representation
+2. **Similarity Search**: Finds most relevant chunks from the knowledge base
+3. **Context Building**: Assembles retrieved chunks into coherent context
+4. **Answer Generation**: Uses local LLM to generate response based on context
+5. **Source Attribution**: Provides citations for transparency
 
-MIT License - feel free to use and modify!
+## Advanced Features
 
-## 🎉 Have Fun!
+### Topic Management
+- Each topic gets its own ChromaDB collection
+- Easy switching between different research areas
+- Persistent storage of all researched topics
 
-This chatbot is designed to make learning fun and accessible. Ask about anything you're curious about - from "How do computers work?" to "What are black holes?" and get explanations that actually make sense!
+### Intelligent Caching
+- Search results are cached to reduce API calls
+- Configurable expiry times
+- Automatic cleanup of expired cache files
 
-Keep being curious! 🌟 
+### Conversation Context
+- Maintains recent conversation history
+- Uses context for better follow-up responses
+- Conversation history per topic
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Ollama Connection Failed**
+   - Ensure Ollama is running: `ollama serve`
+   - Check if models are available: `ollama list`
+
+2. **Missing Models**
+   - The system will automatically attempt to pull missing models
+   - Manually pull: `ollama pull gemma3:1b` and `ollama pull nomic-embed-text`
+
+3. **Search API Errors**
+   - Verify Bright Data credentials in `.env`
+   - Check internet connectivity
+   - Ensure proxy credentials are correct
+
+4. **ChromaDB Issues**
+   - ChromaDB runs automatically with the Node.js client
+   - Clear database: delete the `chroma_db` directory
+
+### Performance Tips
+
+- **Chunk Size**: Adjust based on your use case (smaller = more precise, larger = more context)
+- **Cache Expiry**: Longer expiry reduces API calls but may use stale data
+- **Search Templates**: Customize templates for your specific domain
+
+## System Requirements
+
+- **RAM**: 4GB minimum (8GB recommended for larger topics)
+- **Storage**: Varies by number of topics (typically 100MB-1GB per topic)
+- **Network**: Stable internet for search API calls
+- **CPU**: Modern multi-core processor for embedding generation
+
+## Future Enhancements
+
+- Web interface for easier interaction
+- Support for document upload and processing
+- Multi-language support
+- Advanced search query optimization
+- Integration with additional search providers
+- Export functionality for research reports
+
+## License
+
+MIT License - see the original project for license details.
+
+---
+
+**Note**: This is an advanced RAG system designed for comprehensive topic research and Q&A. Ensure you have the necessary API credentials and local infrastructure before starting. 

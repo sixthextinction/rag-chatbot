@@ -1,337 +1,493 @@
-// disable SSL certificate validation for proxy connections
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
-const fs = require('fs').promises;
-const path = require('path');
 const readline = require('readline');
-const {
-  initializeRAG,
-  askQuestion,
-  getKnowledgeStats,
-  forgetTopic,
-  listKnownTopics
-} = require('./rag');
-const config = require('./config');
+const CONFIG = require('./config');
+const { OllamaClient } = require('./ollama');
+const { initializeVectorStore, storeTopicChunks, listTopics, getTopicStats, topicExists } = require('./vectorstore');
+const { researchTopic } = require('./search');
+const { RAGSystem } = require('./rag');
+const { generateTopicId, validateTopic } = require('./utils');
+const { clearExpiredCache } = require('./cache');
 
-// create readline interface for interactive CLI
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  prompt: '❓ Ask a technical question: '
-});
+// chatbot state variables
+let config = CONFIG;
+let ollama = null;
+let vectorContext = null;
+let ragSystem = null;
+let rl = null;
+let currentPhase = 'TOPIC_INGESTION'; // or 'CHAT'
+let currentTopic = null;
 
-// global variable to store RAG context
-let ragContext = null;
+// initialize the chatbot system
+async function initialize() {
+  console.log(`${'='.repeat(80)}`);
+  console.log('                         INITIALIZING RAG CHATBOT');
+  console.log(`${'='.repeat(80)}\n`);
 
-// display welcome message
-function showWelcome() {
-  console.log('\n🎉 Welcome to the Tech Explainer Chatbot! 🎉');
-  console.log('═════════════════════════════════════════════════');
-  console.log('I can provide a technical brief on any topic.');
-  console.log('I fetch fresh information from the web and generate a comprehensive overview.');
-  console.log('');
-  console.log('💡 Try asking me about:');
-  console.log('   • "What is Apple Intelligence and how does it work?"');
-  console.log('   • "A technical overview of how electric cars work"');
-  console.log('   • "Explain quantum computing to a junior engineer"');
-  console.log('   • "How does the internet work, from first principles?"');
-  console.log('   • Or anything else you\'re curious about!');
-  console.log('');
-  console.log('🎯 Special commands:');
-  console.log('   • /stats - see what I know');
-  console.log('   • /topics - list topics I\'ve learned');
-  console.log('   • /forget <topic> - make me forget something');
-  console.log('   • /help - show this help');
-  console.log('   • /quit - goodbye!');
-  console.log('');
-  console.log('Let\'s start learning! 🚀\n');
-}
-
-// display help message
-function showHelp() {
-  console.log('\n📚 Tech Explainer Chatbot Help');
-  console.log('═════════════════════════════════');
-  console.log('🤔 Just ask me a technical question! I\'ll:');
-  console.log('   1. Search the web for fresh, relevant information');
-  console.log('   2. Analyze the context from multiple sources');
-  console.log('   3. Generate a structured technical brief for a beginner-level engineer');
-  console.log('');
-  console.log('💬 Example questions:');
-  console.log('   • "What is the architecture of a modern CPU?"');
-  console.log('   • "How do LLMs work?"');
-  console.log('   • "What are the pros and cons of microservices?"');
-  console.log('   • "Explain the SOLID principles with examples"');
-  console.log('');
-  console.log('⚡ Special commands:');
-  console.log('   • /stats - show knowledge statistics');
-  console.log('   • /topics - list all topics I know');
-  console.log('   • /forget cats - forget about cats');
-  console.log('   • /help - show this help');
-  console.log('   • /quit - exit the chatbot');
-  console.log('');
-}
-
-// helper function to save brief to a file
-async function saveBriefToFile(topic, content) {
   try {
-    const dataDir = path.join(__dirname, 'data');
-    await fs.mkdir(dataDir, { recursive: true });
-    
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
-    const topicSlug = topic.replace(/\s+/g, '_').toLowerCase();
-    const filename = `${timestamp}_${topicSlug}_brief.md`;
-    const filePath = path.join(dataDir, filename);
-    
-    await fs.writeFile(filePath, content, 'utf-8');
-    console.log(`💾 Brief saved to: ${path.relative(process.cwd(), filePath)}`);
-    
-  } catch (error) {
-    console.error('❌ failed to save brief:', error.message);
-  }
-}
+    // clear expired cache files (if older than expiryDays threshold)
+    clearExpiredCache(config.cache.dir, config.cache.expiryDays);
 
-// handle special commands
-async function handleCommand(input) {
-  const command = input.toLowerCase().trim();
-  
-  if (command === '/help') {
-    showHelp();
-    return true;
-  }
-  
-  if (command === '/quit' || command === '/exit') {
-    console.log('\n👋 Thanks for chatting! Keep being curious! 🌟');
-    process.exit(0);
-  }
-  
-  if (command === '/stats') {
-    try {
-      console.log('\n📊 Knowledge Statistics');
-      console.log('════════════════════════');
-      
-      const stats = await getKnowledgeStats(ragContext);
-      
-      console.log(`🧠 Topics I know about: ${stats.knowledge_base.total_topics}`);
-      console.log(`📚 Total information chunks: ${stats.knowledge_base.total_chunks}`);
-      console.log(`🤖 Generation model: ${stats.models.generation_model.name}`);
-      console.log(`🔮 Embedding model: ${stats.models.embedding_model.name}`);
-      console.log(`⚙️ Max search results: ${stats.configuration.max_search_results}`);
-      console.log(`💾 Cache expires after: ${stats.configuration.cache_expiry_days} days`);
-      
-      if (stats.knowledge_base.recent_topics.length > 0) {
-        console.log(`\n🕒 Recent topics: ${stats.knowledge_base.recent_topics.slice(-3).join(', ')}`);
+    // initialize Ollama client
+    console.log('┌─ Checking Ollama connection...');
+    ollama = new OllamaClient(config);
+    const ollamaStatus = await ollama.checkConnection();
+
+    if (!ollamaStatus.connected) {
+      throw new Error(`Ollama not connected: ${ollamaStatus.error}`);
+    }
+
+    if (ollamaStatus.missingModels.length > 0) {
+      console.log(`├─ Missing models: ${ollamaStatus.missingModels.join(', ')}`);
+      console.log('├─ Attempting to pull missing models...');
+
+      for (const model of ollamaStatus.missingModels) {
+        await ollama.pullModel(model); // just a QOL thing; you can exit and manually pull if you want
       }
-      
-    } catch (error) {
-      console.log('❌ couldn\'t get stats:', error.message);
     }
-    return true;
-  }
-  
-  if (command === '/topics') {
-    try {
-      console.log('\n📋 Topics I Know About');
-      console.log('═══════════════════════');
-      
-      const topics = await listKnownTopics(ragContext);
-      
-      if (topics.length === 0) {
-        console.log('I haven\'t learned about any topics yet! Ask me something to get started.');
-      } else {
-        topics.forEach((topic, i) => {
-          console.log(`   ${i + 1}. ${topic}`);
-        });
-      }
-      
-    } catch (error) {
-      console.log('❌ couldn\'t list topics:', error.message);
-    }
-    return true;
-  }
-  
-  if (command.startsWith('/forget ')) {
-    const topic = command.replace('/forget ', '').trim();
-    if (!topic) {
-      console.log('💭 Usage: /forget <topic name>');
-      return true;
-    }
-    
-    try {
-      await forgetTopic(ragContext, topic);
-      console.log(`🧠💨 Okay, I forgot about "${topic}"`);
-    } catch (error) {
-      console.log(`❌ couldn't forget "${topic}":`, error.message);
-    }
-    return true;
-  }
-  
-  return false; // not a command
-}
 
-// handle user questions
-async function handleQuestion(question) {
-  try {
-    console.log('\n🔍 Compiling technical brief...');
-    
-    const result = await askQuestion(ragContext, question);
-    
-    console.log('\n📝 Technical Brief:');
-    console.log('══════════════════════');
-    console.log(result.answer);
-    
-    // save brief to file
-    await saveBriefToFile(result.topic, result.answer);
-    
-    if (result.sources.length > 0) {
-      console.log('\n📚 Sources I used:');
-      result.sources.forEach((source, i) => {
-        console.log(`   ${i + 1}. ${source.title || source.name}`);
-        if (source.url) {
-          console.log(`      ${source.url}`);
-        }
-      });
-    }
-    
-    console.log(`\n💡 Confidence: ${result.confidence}% | Topic: ${result.topic}`);
-    
-    if (result.learned_new) {
-      console.log('🎉 I learned something new about this topic!');
-    }
-    
+    console.log('└─ ✅ Ollama connected successfully\n');
+
+    // initialize vector store
+    console.log('┌─ Initializing vector store...');
+    vectorContext = await initializeVectorStore(config, ollama);
+    console.log('└─ ✅ Vector store initialized\n');
+
+    // initialize RAG system
+    console.log('┌─ Initializing RAG system...');
+    ragSystem = new RAGSystem(vectorContext, ollama, config);
+    console.log('└─ ✅ RAG system initialized');
+
+    // setup readline interface
+    rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    return true;
+
   } catch (error) {
-    console.log('❌ oops, something went wrong:', error.message);
-    
-    // provide helpful error messages
-    if (error.message.includes('BRIGHT_DATA')) {
-      console.log('\n💡 To fix this:');
-      console.log('   1. Copy env.example to .env');
-      console.log('   2. Add your Bright Data credentials');
-      console.log('   3. Sign up at https://brightdata.com if needed');
-    }
-    
-    if (error.message.includes('ollama') || error.message.includes('models')) {
-      console.log('\n💡 To fix this:');
-      console.log('   1. Make sure Ollama is running: ollama serve');
-      console.log('   2. Download models: ollama pull gemma3:1b');
-      console.log('   3. Download embeddings: ollama pull nomic-embed-text:latest');
-    }
+    console.error('❌ initialization failed:', error.message);
+    throw error;
   }
 }
 
-// main interactive loop
-function startChatbot() {
-  showWelcome();
-  
-  rl.on('line', async (input) => {
-    const trimmedInput = input.trim();
-    
-    if (!trimmedInput) {
-      rl.prompt();
-      return;
-    }
-    
-    // check if it's a command
-    if (trimmedInput.startsWith('/')) {
-      await handleCommand(trimmedInput);
-    } else {
-      // it's a question
-      await handleQuestion(trimmedInput);
-    }
-    
-    console.log('\n' + '─'.repeat(50));
-    rl.prompt();
-  });
-  
-  rl.on('close', () => {
-    console.log('\n👋 Thanks for chatting! Keep being curious! 🌟');
-    process.exit(0);
-  });
-  
-  // start the conversation
-  rl.prompt();
-}
-
-// demonstration function for Apple Intelligence
-async function demonstrateAppleIntelligence() {
-  console.log('🎯 Tech Explainer Demo - Apple Intelligence');
-  console.log('══════════════════════════════════════════════════');
-
+// start the chatbot
+async function start() {
   try {
-    // initialize the RAG pipeline
-    ragContext = await initializeRAG(config);
-
-    // ask the requested question
-    const question = "What is Apple Intelligence and how does it work?";
-    console.log(`\n❓ Demo question: ${question}`);
-    
-    const result = await askQuestion(ragContext, question);
-    
-    console.log('\n📝 Technical Brief:');
-    console.log('══════════════════════');
-    console.log(result.answer);
-    
-    // save that answer to file
-    // await saveBriefToFile(result.topic, result.answer);
-    
-    if (result.sources.length > 0) {
-      console.log('\n📚 Sources used:');
-      result.sources.forEach((source, i) => {
-        console.log(`   ${i + 1}. ${source.title || source.name}`);
-        if (source.url) {
-          console.log(`      ${source.url}`);
-        }
-      });
-    }
-    
-    console.log(`\n💡 Confidence: ${result.confidence}% | Learned new info: ${result.learned_new ? 'Yes' : 'No'}`);
-    
-    console.log('\n🎉 Demo completed! Starting interactive mode...\n');
-    
-    // start interactive chatbot
-    startChatbot();
-    
+    await initialize();
+    await showWelcomeMessage();
+    await interactionLoop();
   } catch (error) {
-    console.error('❌ demo failed:', error.message);
-    
-    if (error.message.includes('missing required models')) {
-      console.log('\n💡 To fix this, run:');
-      console.log('   ollama pull gemma3:1b');
-      console.log('   ollama pull nomic-embed-text:latest');
-    }
-
-    if (error.message.includes('Ollama connection failed')) {
-      console.log('\n💡 To fix this, run:');
-      console.log('   ollama serve');
-    }
-
-    if (error.message.includes('BRIGHT_DATA')) {
-      console.log('\n💡 To fix this:');
-      console.log('   1. Copy env.example to .env');
-      console.log('   2. Add your Bright Data credentials:');
-      console.log('      BRIGHT_DATA_CUSTOMER_ID=your_customer_id');
-      console.log('      BRIGHT_DATA_ZONE=your_zone');
-      console.log('      BRIGHT_DATA_PASSWORD=your_password');
-    }
-
+    console.error('❌ chatbot failed to start:', error.message);
     process.exit(1);
   }
 }
 
-async function main() {
-  // check for 'demo' argument
-  const args = process.argv.slice(2);
-  const isDemo = args.includes('demo');
+// show welcome message and available topics
+async function showWelcomeMessage() {
+  console.log(`${'═'.repeat(80)}`);
+  console.log('                      RAG CHATBOT - TOPIC RESEARCH & Q&A');
+  console.log(`${'═'.repeat(80)}`);
+  console.log();
 
-  if (isDemo) {
-    await demonstrateAppleIntelligence();
+  // show known topics (if any)
+  const availableTopics = await listTopics(vectorContext);
+  if (availableTopics.length > 0) {
+    console.log(`┌${'─'.repeat(78)}┐`);
+    console.log('│                            KNOWLEDGE BASE                                │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    for (const topic of availableTopics) {
+      const stats = await getTopicStats(vectorContext, topic);
+      const displayText = `${topic} (${stats.total_chunks} chunks)`;
+      const padding = 76 - displayText.length;
+      console.log(`│ • ${displayText}${' '.repeat(Math.max(0, padding))} │`);
+    }
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log();
+    console.log('You can research a new topic or ask questions about existing ones');
   } else {
-    // initialize the RAG pipeline
-    ragContext = await initializeRAG(config);
-    startChatbot();
+    console.log(`┌${'─'.repeat(78)}┐`);
+    console.log('│                          KNOWLEDGE BASE EMPTY                           │');
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log();
+    console.log('Enter a topic name to start researching');
+  }
+
+  console.log();
+  console.log(`┌${'─'.repeat(78)}┐`);
+  console.log('│                               COMMANDS                                   │');
+  console.log(`├${'─'.repeat(78)}┤`);
+  console.log('│ • Enter topic name: Research and learn about a topic                    │');
+  console.log('│ • "list": Show all available topics                                     │');
+  console.log('│ • "stats <topic>": Show statistics for a topic                          │');
+  console.log('│ • "switch <topic>": Switch to Q&A mode for an existing topic            │');
+  console.log('│ • "clear": Clear conversation history                                   │');
+  console.log('│ • "quit" or "exit": Exit the chatbot                                    │');
+  console.log(`└${'─'.repeat(78)}┘`);
+  console.log();
+}
+
+// main interaction loop
+async function interactionLoop() {
+  while (true) {
+    try {
+      const input = await getUserInput();
+      const trimmedInput = input.trim();
+
+      if (!trimmedInput) {
+        continue;
+      }
+
+      // handle exit commands
+      if (['quit', 'exit', 'bye'].includes(trimmedInput.toLowerCase())) {
+        console.log(`\n${'═'.repeat(80)}`);
+        console.log('                                GOODBYE!');
+        console.log('                    Thank you for using RAG Chatbot v2!');
+        console.log(`${'═'.repeat(80)}\n`);
+        break;
+      }
+
+      // handle special commands (list, stats, switch, clear, back)
+      if (await handleSpecialCommands(trimmedInput)) {
+        continue;
+      }
+
+      // handle based on current phase
+      if (currentPhase === 'TOPIC_INGESTION') {
+        await handleTopicIngestion(trimmedInput);
+      } else if (currentPhase === 'CHAT') {
+        await handleChatQuestion(trimmedInput);
+      }
+
+    } catch (error) {
+      console.log(`\n┌${'─'.repeat(78)}┐`);
+      console.log('│                                ❌ ERROR                                 │');
+      console.log(`├${'─'.repeat(78)}┤`);
+      const errorMsg = error.message;
+      const padding = 76 - errorMsg.length;
+      console.log(`│ ${errorMsg}${' '.repeat(Math.max(0, padding))} │`);
+      console.log(`└${'─'.repeat(78)}┘`);
+      console.log('Please try again or type "quit" to exit\n');
+    }
+  }
+
+  cleanup();
+}
+
+// research/topic ingestion phase
+// basically: 
+// 1. check if user-given topic exists in the vector db
+// 2. if it does, we switch to chat/q&a mode and ask the user questions about the topic
+// 3. if it doesn't, research mode. We go fetch info about user-given topic from the web, chunk it up, and stuff it in the vector db. And THEN switch to chat mode.
+// 4. we repeat this process for each topic the user wants to research
+async function handleTopicIngestion(input) {
+  if (!validateTopic(input)) {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                            ❌ INVALID TOPIC                             │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    console.log('│ Please enter a valid topic name (1-100 characters)                      │');
+    console.log(`└${'─'.repeat(78)}┘\n`);
+    return;
+  }
+
+  const topicId = generateTopicId(input);
+
+  // check if topic already exists
+  const exists = await topicExists(vectorContext, topicId);
+  if (exists) {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                          📚 TOPIC FOUND                                 │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    const topicMsg = `Topic "${input}" already exists in knowledge base`;
+    const padding = 76 - topicMsg.length;
+    console.log(`│ ${topicMsg}${' '.repeat(Math.max(0, padding))} │`);
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log('Switching to Q&A mode...\n');
+    await switchToChat(topicId, input);
+    return;
+  }
+
+  console.log(`\n${'═'.repeat(80)}`);
+  console.log(`                        RESEARCHING TOPIC: "${input.toUpperCase()}"`);
+  console.log(`${'═'.repeat(80)}`);
+  console.log('This may take a few minutes...\n');
+
+  try {
+    // research the topic
+    const researchData = await researchTopic(input, config);
+
+    if (researchData.chunks.length === 0) {
+      console.log(`┌${'─'.repeat(78)}┐`);
+      console.log('│                            ❌ NO DATA FOUND                             │');
+      console.log(`├${'─'.repeat(78)}┤`);
+      console.log('│ No data found for this topic. Please try a different topic.             │');
+      console.log(`└${'─'.repeat(78)}┘\n`);
+      return;
+    }
+
+    // store in vector database
+    console.log('┌─ Storing knowledge in vector database...');
+    await storeTopicChunks(vectorContext, topicId, researchData.chunks);
+
+    console.log(`\n${'═'.repeat(80)}`);
+    console.log(`                          ✅ RESEARCH COMPLETE FOR "${input.toUpperCase()}"`);
+    console.log(`${'═'.repeat(80)}`);
+    console.log(`Collected ${researchData.chunks.length} chunks from ${researchData.metadata.sources.length} sources`);
+
+    // small delay to ensure collection is fully available
+    console.log('Ensuring database consistency...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log('Switching to Q&A mode...\n');
+
+    // switch to chat mode
+    await switchToChat(topicId, input);
+
+  } catch (error) {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                           ❌ RESEARCH FAILED                            │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    const errorMsg = error.message;
+    const padding = 76 - errorMsg.length;
+    console.log(`│ ${errorMsg}${' '.repeat(Math.max(0, padding))} │`);
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log('Please try a different topic or check your configuration\n');
   }
 }
 
-main().catch(error => {
-  console.error('\n💥 unhandled error in main:', error.message);
-  process.exit(1);
-}); 
+// chat phase
+// basically: 
+// 1. the user asks a question
+// 2. we answer the question using the information in the vector db
+// 3. we repeat this process for each question the user asks
+async function handleChatQuestion(question) {
+  try {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                              THINKING...                                │');
+    console.log(`└${'─'.repeat(78)}┘\n`);
+
+    const response = await ragSystem.answerQuestion(question);
+
+    console.log(`${'═'.repeat(80)}`);
+    console.log('                                  ANSWER');
+    console.log(`${'═'.repeat(80)}`);
+    console.log(response.answer);
+    console.log();
+
+    if (response.sources.length > 0) {
+      console.log(`┌${'─'.repeat(78)}┐`);
+      console.log('│                                SOURCES                                  │');
+      console.log(`├${'─'.repeat(78)}┤`);
+      response.sources.forEach(source => {
+        const padding = 74 - source.length;
+        console.log(`│ • ${source}${' '.repeat(Math.max(0, padding))} │`);
+      });
+      console.log(`└${'─'.repeat(78)}┘`);
+      console.log();
+    }
+
+    console.log(`Used ${response.chunks_used} knowledge chunks\n`);
+
+  } catch (error) {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                        ❌ FAILED TO ANSWER QUESTION                     │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    const errorMsg = error.message;
+    const padding = 76 - errorMsg.length;
+    console.log(`│ ${errorMsg}${' '.repeat(Math.max(0, padding))} │`);
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log('Please try rephrasing your question\n');
+  }
+}
+
+// changes the current phase to 'CHAT' (Q&A mode) and sets the current topic
+async function switchToChat(topicId, topicName) {
+  try {
+    console.log(`┌─ Verifying topic exists: ${topicId}`);
+    await ragSystem.setTopic(topicId);
+    currentPhase = 'CHAT';
+    currentTopic = topicName;
+
+    console.log(`\n${'═'.repeat(80)}`);
+    console.log(`                      Q&A MODE FOR: ${topicName.toUpperCase()}`);
+    console.log(`${'═'.repeat(80)}`);
+    console.log('Ask me anything about this topic!');
+    console.log('Type "back" to return to topic selection\n');
+
+  } catch (error) {
+    console.log(`\n┌${'─'.repeat(78)}┐`);
+    console.log('│                      ❌ FAILED TO SWITCH TO CHAT MODE                   │');
+    console.log(`├${'─'.repeat(78)}┤`);
+    const errorMsg = error.message;
+    const padding = 76 - errorMsg.length;
+    console.log(`│ ${errorMsg}${' '.repeat(Math.max(0, padding))} │`);
+    console.log(`└${'─'.repeat(78)}┘`);
+    console.log(`Debug: Attempted to switch to topic ID: "${topicId}"`);
+
+    // try to list available topics for debugging
+    try {
+      const availableTopics = await listTopics(vectorContext);
+      console.log(`Debug: Available topics: [${availableTopics.join(', ')}]\n`);
+    } catch (listError) {
+      console.log('Debug: Failed to list topics for debugging\n');
+    }
+  }
+}
+
+// handle special commands (list, stats, switch, clear, back)
+async function handleSpecialCommands(input) {
+  const [command, ...args] = input.toLowerCase().split(' ');
+
+  switch (command) {
+    case 'list':
+      await showAvailableTopics();
+      return true;
+
+    case 'stats':
+      if (args.length > 0) {
+        await showTopicStats(args.join(' '));
+      } else {
+        console.log('❌ usage: stats <topic_name>\n');
+      }
+      return true;
+
+    case 'switch':
+      if (args.length > 0) {
+        await switchToExistingTopic(args.join(' '));
+      } else {
+        console.log('❌ usage: switch <topic_name>\n');
+      }
+      return true;
+
+    case 'clear':
+      if (ragSystem) {
+        ragSystem.clearHistory();
+        console.log('✅ conversation history cleared\n');
+      }
+      return true;
+
+    case 'back':
+      if (currentPhase === 'CHAT') {
+        currentPhase = 'TOPIC_INGESTION';
+        currentTopic = null;
+        console.log(`\n┌${'─'.repeat(78)}┐`);
+        console.log('│                        TOPIC SELECTION MODE                             │');
+        console.log(`└${'─'.repeat(78)}┘\n`);
+      }
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+// show all topics the chatbot knows about (i.e. are in the vector db)
+async function showAvailableTopics() {
+  try {
+    const topics = await listTopics(vectorContext);
+
+    if (topics.length === 0) {
+      console.log('No topics available yet.\n');
+      return;
+    }
+
+    console.log('Available topics:');
+    for (const topic of topics) {
+      const stats = await getTopicStats(vectorContext, topic);
+      console.log(`  • ${topic} (${stats.total_chunks} chunks, ${Object.keys(stats.sources).length} sources)`);
+    }
+    console.log();
+
+  } catch (error) {
+    console.error('❌ failed to list topics:', error.message);
+  }
+}
+
+// DEBUG: show statistics for a topic (i.e. how many chunks, sources, etc.)
+async function showTopicStats(topicName) {
+  try {
+    const topicId = generateTopicId(topicName);
+    const exists = await topicExists(vectorContext, topicId);
+
+    if (!exists) {
+      console.log(`❌ topic "${topicName}" not found\n`);
+      return;
+    }
+
+    const stats = await getTopicStats(vectorContext, topicId);
+
+    console.log(`Statistics for "${topicName}":`);
+    console.log(`  • total chunks: ${stats.total_chunks}`);
+    console.log(`  • sources: ${Object.keys(stats.sources).length}`);
+    console.log(`  • chunk types: ${Object.keys(stats.chunk_types).join(', ')}`);
+    console.log(`  • search types: ${Object.keys(stats.search_types).join(', ')}`);
+    console.log();
+
+  } catch (error) {
+    console.error('❌ failed to get topic stats:', error.message);
+  }
+}
+
+// switch to an existing (i.e. the chatbot already knows about) topic
+async function switchToExistingTopic(topicName) {
+  try {
+    const topicId = generateTopicId(topicName);
+    const exists = await topicExists(vectorContext, topicId);
+
+    if (!exists) {
+      console.log(`❌ topic "${topicName}" not found. available topics:`);
+      await showAvailableTopics();
+      return;
+    }
+
+    await switchToChat(topicId, topicName);
+
+  } catch (error) {
+    console.error('❌ failed to switch topic:', error.message);
+  }
+}
+
+// read user input
+function getUserInput() {
+  const prompt = currentPhase === 'CHAT'
+    ? `\n[${currentTopic}] Your question: `
+    : '\nEnter topic to research (or command): ';
+
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
+
+// cleanup resources
+function cleanup() {
+  if (rl) {
+    rl.close();
+  }
+  console.log('[CLEANED UP RESOURCES]');
+}
+
+// start the chatbot if this file is run directly
+if (require.main === module) {
+  // handle graceful shutdown
+  process.on('SIGINT', () => {
+    console.log(`\n${'═'.repeat(80)}`);
+    console.log('                           SHUTTING DOWN GRACEFULLY');
+    console.log(`${'═'.repeat(80)}`);
+    cleanup();
+    process.exit(0);
+  });
+
+  // start the chatbot
+  start().catch(error => {
+    console.error('❌ chatbot crashed:', error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  start,
+  initialize,
+  handleTopicIngestion,
+  handleChatQuestion,
+  switchToChat,
+  cleanup
+}; 

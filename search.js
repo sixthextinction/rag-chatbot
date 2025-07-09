@@ -4,14 +4,15 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const fetch = require('node-fetch');
 const { hasCachedData, loadCachedData, saveCacheData } = require('./cache');
-const { generateTopicId } = require('./utils');
+const { generateTopicId, chunkText } = require('./utils');
 
+// fetch search results for a single query
 async function fetchTopicData(searchQuery, config) {
   // check for cached data first
   if (hasCachedData(searchQuery, config.cache?.dir, config.cache?.expiryDays)) {
     const cachedResults = loadCachedData(searchQuery, config.cache?.dir);
-    if (cachedResults) {
-      return cachedResults;
+    if (cachedResults && cachedResults.data) {
+      return cachedResults.data;
     }
   }
 
@@ -25,7 +26,7 @@ async function fetchTopicData(searchQuery, config) {
 
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&num=${config.brightData.maxResults}&brd_json=1`;
 
-    console.log(`🔍 searching for: ${searchQuery}`);
+    console.log(`searching for: ${searchQuery}`);
 
     const response = await fetch(searchUrl, {
       method: 'GET',
@@ -66,15 +67,16 @@ async function fetchTopicData(searchQuery, config) {
   }
 }
 
-// gather comprehensive topic data using multiple search templates
-async function gatherTopicData(topic, config) {
+// comprehensive topic research using multiple search templates
+async function researchTopic(topic, config) {
   const allChunks = [];
   const searchResults = [];
   const topicId = generateTopicId(topic);
 
-  console.log(`📊 gathering comprehensive data for: ${topic}`);
+  console.log(`researching topic: ${topic}`);
+  console.log(`using ${config.search.searchTemplates.length} search templates`);
   
-  // search using each template for this topic
+  // execute searches using each template
   for (let i = 0; i < config.search.searchTemplates.length; i++) {
     const template = config.search.searchTemplates[i];
     const searchQuery = buildTopicSearchQuery(template, topic);
@@ -88,17 +90,17 @@ async function gatherTopicData(topic, config) {
       const searchData = await fetchTopicData(searchQuery, config);
       searchResults.push(searchData);
       
-      // build knowledge chunks from this search
-      const knowledgeBase = buildTopicKnowledgeBase(searchData, topic, topicId, template);
-      allChunks.push(...knowledgeBase.chunks);
+      // process search results into chunks
+      const chunks = processSearchResults(searchData, topic, topicId, template, config);
+      allChunks.push(...chunks);
       
     } catch (error) {
-      console.warn(`⚠️ search failed for template "${template}": ${error.message}`);
+      console.warn(`search failed for template "${template}": ${error.message}`);
       // continue with other searches even if one fails
     }
   }
 
-  console.log(`📚 collected ${allChunks.length} total chunks for ${topic}`);
+  console.log(`collected ${allChunks.length} total chunks for ${topic}`);
   
   // extract unique sources from all chunks
   const uniqueSources = [...new Set(allChunks.map(chunk => chunk.source))];
@@ -108,6 +110,7 @@ async function gatherTopicData(topic, config) {
     searchResults,
     metadata: {
       topic,
+      topicId,
       searchTemplatesUsed: config.search.searchTemplates.length,
       totalChunks: allChunks.length,
       sources: uniqueSources,
@@ -116,34 +119,42 @@ async function gatherTopicData(topic, config) {
   };
 }
 
-// build structured data from SERP results for a single topic
-function buildTopicKnowledgeBase(searchResults, topic, topicId, searchTemplate) {
+// process search results into structured chunks
+function processSearchResults(searchResults, topic, topicId, searchTemplate, config) {
   const chunks = [];
 
   // process organic search results
   if (searchResults.organic) {
     searchResults.organic.forEach((result, index) => {
       if (result.title && result.description) {
-        // create unique ID using template key and URL hash to avoid duplicates
-        const parts = searchTemplate.split(' ');
-        let templateKey = parts[0] === '{topic}' && parts.length > 1 ? parts[1] : parts[0];
-        templateKey = templateKey.replace(/[^a-z0-9]/gi, '') || 'general';
+        // create content combining title and description
+        const content = `${result.title}\n${result.description}`;
         
-        const urlHash = result.link ? result.link.split('/').pop().substring(0, 8) : index;
-        chunks.push({
-          id: `${templateKey}_organic_${index}_${urlHash}`,
-          content: `${result.title}\n${result.description}`,
-          source: result.display_link || 'unknown',
-          url: result.link || '',
-          type: 'search_result',
-          metadata: {
-            topic,
+        // chunk the content if it's too long
+        const textChunks = chunkText(content, config.rag.chunkSize, config.rag.chunkOverlap);
+        
+        textChunks.forEach((chunk, chunkIndex) => {
+          // create unique ID for each chunk
+          const templateKey = getTemplateKey(searchTemplate);
+          const urlHash = result.link ? result.link.split('/').pop().substring(0, 8) : index;
+          
+          chunks.push({
+            id: `${templateKey}_organic_${index}_${chunkIndex}_${urlHash}`,
+            content: chunk,
             source: result.display_link || 'unknown',
             url: result.link || '',
-            title: result.title,
-            searchType: getSearchType(searchTemplate),
-            rank: index + 1
-          }
+            type: 'search_result',
+            metadata: {
+              topic,
+              topicId,
+              source: result.display_link || 'unknown',
+              url: result.link || '',
+              title: result.title,
+              searchType: getSearchType(searchTemplate),
+              rank: index + 1,
+              chunkIndex
+            }
+          });
         });
       }
     });
@@ -164,64 +175,45 @@ function buildTopicKnowledgeBase(searchResults, topic, topicId, searchTemplate) 
     }
 
     if (knowledgeContent.length > 0) {
-      // create unique ID by including search template to avoid duplicates
-      const parts = searchTemplate.split(' ');
-      let templateKey = parts[0] === '{topic}' && parts.length > 1 ? parts[1] : parts[0];
-      templateKey = templateKey.replace(/[^a-z0-9]/gi, '') || 'general';
-
-      const contentHash = knowledgeContent.join('').substring(0, 8);
-      chunks.push({
-        id: `${templateKey}_knowledge_graph_${contentHash}`,
-        content: knowledgeContent.join('\n'),
-        source: 'Google Knowledge Graph',
-        url: '',
-        type: 'knowledge_graph',
-        metadata: {
-          topic,
+      const content = knowledgeContent.join('\n');
+      const textChunks = chunkText(content, config.rag.chunkSize, config.rag.chunkOverlap);
+      
+      textChunks.forEach((chunk, chunkIndex) => {
+        const templateKey = getTemplateKey(searchTemplate);
+        
+        chunks.push({
+          id: `${templateKey}_knowledge_graph_${chunkIndex}`,
+          content: chunk,
           source: 'Google Knowledge Graph',
           url: '',
-          title: 'Knowledge Graph',
-          searchType: 'knowledge_graph',
-          rank: 0 // highest priority
-        }
+          type: 'knowledge_graph',
+          metadata: {
+            topic,
+            topicId,
+            source: 'Google Knowledge Graph',
+            url: '',
+            title: 'Knowledge Graph',
+            searchType: 'knowledge_graph',
+            rank: 0, // highest priority
+            chunkIndex
+          }
+        });
       });
     }
   }
 
-  return {
-    chunks,
-    metadata: {
-      timestamp: new Date().toISOString(),
-      topic,
-      searchTemplate,
-      total_chunks: chunks.length,
-      organic_results_count: searchResults.organic?.length || 0,
-      has_knowledge_graph: !!searchResults.knowledge,
-      search_quality_score: calculateSearchQuality(searchResults)
-    }
-  };
+  return chunks;
 }
 
-function calculateSearchQuality(searchResults) {
-  let score = 0;
-  let maxScore = 100;
-
-  // organic results quality (60% of score)
-  if (searchResults.organic && searchResults.organic.length > 0) {
-    const organicScore = Math.min(searchResults.organic.length * 10, 60);
-    score += organicScore;
-  }
-
-  // knowledge graph presence (40% of score)
-  if (searchResults.knowledge) {
-    score += 40;
-  }
-
-  return Math.round((score / maxScore) * 100);
-}
-
+// helper functions
 function buildTopicSearchQuery(template, topic) {
   return template.replace('{topic}', topic);
+}
+
+function getTemplateKey(template) {
+  const parts = template.split(' ');
+  let templateKey = parts[0] === '{topic}' && parts.length > 1 ? parts[1] : parts[0];
+  return templateKey.replace(/[^a-z0-9]/gi, '') || 'general';
 }
 
 function getSearchType(template) {
@@ -230,14 +222,16 @@ function getSearchType(template) {
   if (template.includes('definition')) return 'definition';
   if (template.includes('how')) return 'howto';
   if (template.includes('examples')) return 'examples';
+  if (template.includes('vs') || template.includes('alternatives')) return 'comparison';
+  if (template.includes('news') || template.includes('update')) return 'news';
   return 'general';
 }
 
 module.exports = {
-  gatherTopicData,
+  researchTopic,
   fetchTopicData,
-  buildTopicKnowledgeBase,
-  calculateSearchQuality,
+  processSearchResults,
   buildTopicSearchQuery,
-  getSearchType
+  getSearchType,
+  getTemplateKey
 }; 

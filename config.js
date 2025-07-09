@@ -9,7 +9,7 @@ const CONFIG = {
     password: process.env.BRIGHT_DATA_PASSWORD,
     proxyHost: 'brd.superproxy.io',
     proxyPort: 33335,
-    maxResults: 8 // fewer results for simpler explanations
+    maxResults: 10 // more results for comprehensive topic research
   },
 
   // ollama configuration for local LLM
@@ -22,61 +22,71 @@ const CONFIG = {
   // chromadb configuration
   vectorDb: {
     path: './chroma_db',
-    collectionName: 'tech_brief_knowledge'
+    baseCollectionName: 'topic_knowledge' // will append topic name
   },
 
-  // search configuration for diverse topics
+  // search configuration for comprehensive topic research
   search: {
-    maxSearchQueries: 5, // multiple queries for comprehensive coverage
+    maxSearchQueries: 8, // comprehensive research queries
     searchTemplates: [
-      // Core
+      // fundamental understanding
       'what is {topic}?',
-      '{topic} explained',
+      '{topic} explained simply',
+      '{topic} definition and overview',
       '{topic} beginner guide',
-      '{topic} definition',
 
-      // Technicals
-      '{topic} how does it work',
-      '{topic} architecture',
-      '{topic} use cases',
+      // technical details
+      '{topic} how it works',
+      '{topic} architecture details',
+      '{topic} technical specifications',
+      '{topic} implementation guide',
 
-      // Examples
-      '{topic} real world examples',
+      // practical applications
+      '{topic} use cases examples',
+      '{topic} real world applications',
       'companies using {topic}',
+      '{topic} best practices',
 
-      // Comparisons
+      // comparisons and context
       '{topic} vs alternatives',
+      '{topic} advantages disadvantages',
       'alternatives to {topic}',
+      '{topic} comparison',
 
-      // Opinions
-      'is {topic} worth it?',
-      '{topic} pros and cons',
-      'reviews of {topic}',
-
-      // News
-      '{topic} latest news',
-      '{topic} 2025 update'
+      // current information
+      '{topic} latest news 2025',
+      '{topic} recent updates',
+      '{topic} current state',
+      '{topic} future outlook'
     ]
   },
 
-  // caching and performance settings
+  // caching settings
   cache: {
     dir: 'cache',
-    expiryDays: 3 // shorter cache for fresh info
+    expiryDays: 2 // fresh data for current topics
   },
 
   // request settings
   requests: {
-    delayBetweenRequests: 800, // slightly faster for better UX
+    delayBetweenRequests: 1000, // respectful rate limiting
     maxRetries: 3
   },
 
-  // technical brief generation settings
-  brief: {
-    maxContextLength: 8000, // larger context for detailed briefs
-    chunkSize: 500,
+  // RAG settings
+  rag: {
+    chunkSize: 400, // optimal chunk size for semantic coherence
     chunkOverlap: 50,
-    maxRetrievedChunks: 10 // retrieve more chunks for comprehensive answers
+    maxRetrievedChunks: 8, // balance between context and token limits
+    maxContextLength: 6000 // context window for generation
+  },
+
+  // chatbot interaction settings
+  chat: {
+    maxHistoryLength: 10, // keep recent conversation context
+    systemPrompt: `You are a helpful AI assistant that answers questions about specific topics using provided context. 
+Always base your answers on the given context. If the context doesn't contain enough information to answer the question, 
+say "I don't have enough information in my knowledge base to answer that question." Be concise but informative.`
   }
 };
 

@@ -1,4 +1,6 @@
+node_modules/
 .env
-node_modules
-data
-cache
+data/
+cache/
+chroma_db/
+*.log 

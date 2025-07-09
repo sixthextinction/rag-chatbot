@@ -1,329 +1,260 @@
-const { gatherTopicData } = require('./search');
-const { 
-  initializeVectorStore, 
-  storeTopicChunks, 
-  searchSimilar, 
-  getTopicChunks, 
-  listTopics, 
-  deleteTopic, 
-  getVectorStats,
-  cleanupOldTopics
-} = require('./vectorstore');
-const { 
-  createOllamaClient, 
-  checkModels, 
-  generateEmbedding, 
-  generateEmbeddings, 
-  generateTechnicalBrief,
-  testConnection, 
-  getModelInfo,
-  testGeneration
-} = require('./ollama');
-const { generateTopicId } = require('./utils');
+const { searchTopicChunks, topicExists } = require('./vectorstore');
+const { sanitizeInput } = require('./utils');
 
-// initialize the RAG pipeline
-async function initializeRAG(config) {
-  try {
-    console.log('🚀 initializing RAG pipeline...');
-    
-    const ollama = createOllamaClient(config);
-    
-    // check ollama connection and models first
-    await testConnection(ollama, config);
-    await checkModels(ollama, config);
-    await testGeneration(ollama, config);
-    
-    const vectorStore = await initializeVectorStore(config, ollama);
-    
-    console.log('✅ RAG pipeline initialized successfully');
-    return { ollama, vectorStore, config };
-  } catch (error) {
-    console.error('❌ failed to initialize RAG pipeline:', error.message);
-    throw error;
+// RAG system for answering questions about a specific topic
+class RAGSystem {
+  constructor(vectorContext, ollama, config) {
+    this.vectorContext = vectorContext;
+    this.ollama = ollama;
+    this.config = config;
+    this.currentTopic = null;
+    this.currentTopicId = null;
+    this.conversationHistory = [];
   }
-}
 
-// learn about a new topic by gathering and storing information
-async function learnTopic(ragContext, topic) {
-  const { ollama, vectorStore, config } = ragContext;
-  
-  try {
-    const topicId = generateTopicId(topic);
-    console.log(`\n📖 learning about: ${topic}`);
+  // set the current topic for the conversation
+  async setTopic(topicId) {
+    console.log(`checking if topic exists: ${topicId}`);
+    const exists = await topicExists(this.vectorContext, topicId);
+    console.log(`topic exists result: ${exists}`);
+    
+    if (!exists) {
+      throw new Error(`topic "${topicId}" not found in knowledge base`);
+    }
+    
+    this.currentTopic = topicId;
+    this.currentTopicId = topicId;
+    this.conversationHistory = []; // reset conversation history for new topic
+    
+    console.log(`set current topic to: ${topicId}`);
+    return true;
+  }
 
-    // check if we already know about this topic
-    const existingTopics = await listTopics(vectorStore);
-    if (existingTopics.includes(topicId)) {
-      console.log('🧠 I already know about this topic!');
-      return { topicId, learned: false, cached: true };
+  // answer a question using RAG
+  async answerQuestion(question) {
+    if (!this.currentTopicId) {
+      throw new Error('no topic set. Please set a topic first.');
     }
 
-    // gather fresh information about the topic
-    const topicData = await gatherTopicData(topic, config);
-    
-    if (topicData.chunks.length === 0) {
-      throw new Error(`couldn't find useful information about: ${topic}`);
+    const sanitizedQuestion = sanitizeInput(question);
+    if (!sanitizedQuestion.trim()) {
+      throw new Error('question cannot be empty');
     }
 
-    console.log(`📚 learned ${topicData.chunks.length} things about ${topic} from ${topicData.metadata.sources.length} sources`);
+    console.log(`answering question about ${this.currentTopicId}: ${sanitizedQuestion}`);
 
-    // generate embeddings for all chunks
-    const texts = topicData.chunks.map(chunk => chunk.content);
-    const embeddings = await generateEmbeddings(ollama, config, texts);
-
-    // store in vector database
-    await storeTopicChunks(vectorStore, topicData.chunks, embeddings, topicId);
-
-    // cleanup old topics if we have too many
-    await cleanupOldTopics(vectorStore, 30);
-
-    console.log('✅ topic learned successfully');
-    return { 
-      topicId, 
-      learned: true,
-      cached: topicData.cached,
-      metadata: topicData.metadata
-    };
-  } catch (error) {
-    console.error('❌ failed to learn topic:', error.message);
-    throw error;
-  }
-}
-
-// answer a question by generating a technical brief
-async function askQuestion(ragContext, question, specificTopic = null) {
-  const { ollama, vectorStore, config } = ragContext;
-  
-  try {
-    console.log(`\n❓ technical question: ${question}`);
-
-    // try to understand what topic the question is about
-    const topic = specificTopic || extractTopicFromQuestion(question);
-    console.log(`🎯 detected topic: ${topic}`);
-
-    // learn about the topic if we haven't already
-    const learningResult = await learnTopic(ragContext, topic);
-    const topicId = learningResult.topicId;
-
-    // generate embedding for the question
-    const questionEmbedding = await generateEmbedding(ollama, config, question);
-
-    // search for relevant information
-    const relevantChunks = await searchSimilar(
-      vectorStore,
-      questionEmbedding, 
-      config.brief.maxRetrievedChunks,
-      topicId
-    );
-
-    if (relevantChunks.length === 0) {
-      return {
-        answer: "I couldn't find enough information to generate a technical brief. Please try a different or more specific question.",
-        sources: [],
-        confidence: 0,
-        topic: topic
-      };
-    }
-
-    // build context from relevant chunks
-    const context = buildContext(relevantChunks, config);
-    const sources = extractSources(relevantChunks);
-
-    // generate technical brief
-    const explanation = await generateTechnicalBrief(
-      ollama,
-      config,
-      context, 
-      question, 
-      topic
-    );
-
-    console.log('✅ technical brief ready!');
-
-    return {
-      answer: explanation,
-      sources: sources.slice(0, 5), // show more sources for technical briefs
-      confidence: calculateConfidence(relevantChunks),
-      topic: topic,
-      learned_new: learningResult.learned
-    };
-  } catch (error) {
-    console.error('❌ failed to answer question:', error.message);
-    throw error;
-  }
-}
-
-// get information about what topics we know
-async function getKnowledgeStats(ragContext) {
-  const { vectorStore, ollama, config } = ragContext;
-  
-  try {
-    const vectorStats = await getVectorStats(vectorStore);
-    const modelInfo = await getModelInfo(ollama, config);
-
-    return {
-      knowledge_base: {
-        total_topics: vectorStats.total_topics,
-        total_chunks: vectorStats.total_chunks,
-        recent_topics: vectorStats.recent_topics,
-        collection_name: vectorStats.collection_name
-      },
-      models: modelInfo,
-      configuration: {
-        max_search_results: config.brightData.maxResults,
-        cache_expiry_days: config.cache.expiryDays,
-        max_context_length: config.brief.maxContextLength
+    try {
+      // retrieve relevant chunks
+      const relevantChunks = await this.retrieveRelevantChunks(sanitizedQuestion);
+      
+      if (relevantChunks.length === 0) {
+        return {
+          answer: "I don't have enough information in my knowledge base to answer that question.",
+          sources: [],
+          chunks_used: 0,
+          topic: this.currentTopicId
+        };
       }
+
+      // generate answer using retrieved context
+      const answer = await this.generateAnswer(sanitizedQuestion, relevantChunks);
+      
+      // add to conversation history
+      this.addToHistory('user', sanitizedQuestion);
+      this.addToHistory('assistant', answer.answer);
+
+      return {
+        answer: answer.answer,
+        sources: this.extractSources(relevantChunks),
+        chunks_used: relevantChunks.length,
+        topic: this.currentTopicId,
+        context_used: relevantChunks.map(chunk => ({
+          content: chunk.content.substring(0, 100) + '...',
+          source: chunk.metadata.source,
+          type: chunk.metadata.type
+        }))
+      };
+
+    } catch (error) {
+      console.error('❌ failed to answer question:', error.message);
+      throw error;
+    }
+  }
+
+  // retrieve relevant chunks for the question
+  async retrieveRelevantChunks(question) {
+    try {
+      const chunks = await searchTopicChunks(
+        this.vectorContext,
+        this.currentTopicId,
+        question,
+        this.config.rag.maxRetrievedChunks
+      );
+
+      // filter out chunks that are too similar (basic deduplication)
+      const uniqueChunks = this.deduplicateChunks(chunks);
+      
+      console.log(`retrieved ${uniqueChunks.length} relevant chunks`);
+      return uniqueChunks;
+    } catch (error) {
+      console.error('❌ failed to retrieve chunks:', error.message);
+      return [];
+    }
+  }
+
+  // generate answer using retrieved context
+  async generateAnswer(question, chunks) {
+    try {
+      const context = this.buildContext(chunks);
+      const prompt = this.buildPrompt(question, context);
+
+      console.log(`generating answer using ${chunks.length} chunks...`);
+
+      const response = await this.ollama.chat({
+        system: this.config.chat.systemPrompt,
+        prompt: prompt,
+        temperature: 0.7,
+        num_predict: 512
+      });
+
+      return {
+        answer: response.message.content.trim(),
+        tokens_used: response.eval_count || 0,
+        generation_time: response.total_duration || 0
+      };
+    } catch (error) {
+      console.error('❌ failed to generate answer:', error.message);
+      throw error;
+    }
+  }
+
+  // build context from retrieved chunks
+  buildContext(chunks) {
+    let context = '';
+    let currentLength = 0;
+    const maxLength = this.config.rag.maxContextLength;
+
+    // prioritize chunks by relevance (distance) and type
+    const sortedChunks = chunks.sort((a, b) => {
+      // knowledge graph chunks get highest priority
+      if (a.metadata.type === 'knowledge_graph' && b.metadata.type !== 'knowledge_graph') {
+        return -1;
+      }
+      if (b.metadata.type === 'knowledge_graph' && a.metadata.type !== 'knowledge_graph') {
+        return 1;
+      }
+      // then sort by distance (relevance)
+      return a.distance - b.distance;
+    });
+
+    for (const chunk of sortedChunks) {
+      const chunkText = `Source: ${chunk.metadata.source}\n${chunk.content}\n\n`;
+      
+      if (currentLength + chunkText.length <= maxLength) {
+        context += chunkText;
+        currentLength += chunkText.length;
+      } else {
+        break;
+      }
+    }
+
+    return context.trim();
+  }
+
+  // build the final prompt for the LLM
+  buildPrompt(question, context) {
+    const conversationContext = this.getRecentConversationContext();
+    
+    let prompt = `Answer the user's question using only the context below. If the answer isn't there, say you don't know.
+
+CONTEXT:
+${context}`;
+
+    if (conversationContext) {
+      prompt += `\n\nRECENT CONVERSATION:
+${conversationContext}`;
+    }
+
+    prompt += `\n\nQUESTION:
+${question}`;
+
+    return prompt;
+  }
+
+  // get recent conversation context
+  getRecentConversationContext() {
+    if (this.conversationHistory.length === 0) {
+      return '';
+    }
+
+    const recentHistory = this.conversationHistory.slice(-4); // last 2 exchanges
+    return recentHistory
+      .map(entry => `${entry.role}: ${entry.content}`)
+      .join('\n');
+  }
+
+  // add message to conversation history
+  addToHistory(role, content) {
+    this.conversationHistory.push({
+      role,
+      content,
+      timestamp: new Date().toISOString()
+    });
+
+    // keep history manageable
+    if (this.conversationHistory.length > this.config.chat.maxHistoryLength) {
+      this.conversationHistory = this.conversationHistory.slice(-this.config.chat.maxHistoryLength);
+    }
+  }
+
+  // basic deduplication of chunks
+  deduplicateChunks(chunks) {
+    const seen = new Set();
+    const unique = [];
+
+    for (const chunk of chunks) {
+      // create a simple hash of the content
+      const contentHash = chunk.content.substring(0, 100).toLowerCase().replace(/\s+/g, ' ');
+      
+      if (!seen.has(contentHash)) {
+        seen.add(contentHash);
+        unique.push(chunk);
+      }
+    }
+
+    return unique;
+  }
+
+  // extract unique sources from chunks
+  extractSources(chunks) {
+    const sources = new Set();
+    chunks.forEach(chunk => {
+      if (chunk.metadata.source && chunk.metadata.source !== 'unknown') {
+        sources.add(chunk.metadata.source);
+      }
+    });
+    return Array.from(sources);
+  }
+
+  // get current topic info
+  getCurrentTopic() {
+    return {
+      topic: this.currentTopic,
+      topicId: this.currentTopicId,
+      conversationLength: this.conversationHistory.length
     };
-  } catch (error) {
-    console.error('❌ failed to get knowledge stats:', error.message);
-    throw error;
+  }
+
+  // clear conversation history
+  clearHistory() {
+    this.conversationHistory = [];
+    console.log('cleared conversation history');
+  }
+
+  // get conversation history
+  getHistory() {
+    return this.conversationHistory;
   }
 }
 
-// forget about a specific topic
-async function forgetTopic(ragContext, topic) {
-  const { vectorStore } = ragContext;
-  
-  try {
-    const topicId = generateTopicId(topic);
-    const result = await deleteTopic(vectorStore, topicId);
-    console.log(`🧠💨 forgot about: ${topic}`);
-    return result;
-  } catch (error) {
-    console.error('❌ failed to forget topic:', error.message);
-    throw error;
-  }
-}
-
-// list all topics we know about
-async function listKnownTopics(ragContext) {
-  const { vectorStore } = ragContext;
-  
-  try {
-    const topicIds = await listTopics(vectorStore);
-    const topics = topicIds.map(id => parseTopicId(id));
-    
-    console.log(`🧠 I know about ${topics.length} topics`);
-    return topics;
-  } catch (error) {
-    console.error('❌ failed to list topics:', error.message);
-    throw error;
-  }
-}
-
-// helper functions
-function parseTopicId(topicId) {
-  return topicId.replace(/_/g, ' ');
-}
-
-function extractTopicFromQuestion(question) {
-  // simple topic extraction - in practice, you might want something more sophisticated
-  const words = question.toLowerCase()
-    .replace(/[?!.]/g, '')
-    .replace(/what is|how does|explain|tell me about|what are/g, '')
-    .trim();
-  
-  // try to find key topic words
-  const topicIndicators = [
-    'apple intelligence', 'artificial intelligence', 'machine learning',
-    'quantum computing', 'blockchain', 'cryptocurrency', 'climate change',
-    'space exploration', 'renewable energy', 'genetic engineering'
-  ];
-  
-  for (const indicator of topicIndicators) {
-    if (words.includes(indicator)) {
-      return indicator;
-    }
-  }
-  
-  // fallback: use first few meaningful words
-  const meaningfulWords = words.split(' ')
-    .filter(word => word.length > 3 && !['what', 'does', 'work', 'like'].includes(word))
-    .slice(0, 3)
-    .join(' ');
-    
-  return meaningfulWords || words.split(' ').slice(0, 3).join(' ');
-}
-
-function buildContext(relevantChunks, config) {
-  // build context for generating a technical brief
-  let context = '';
-  const addedSources = new Set();
-  
-  for (const chunk of relevantChunks) {
-    const chunkSource = chunk.metadata.source || 'Unknown Source';
-    const sourceIdentifier = chunk.metadata.url || chunkSource;
-
-    // to avoid redundancy, add source info only once
-    if (!addedSources.has(sourceIdentifier)) {
-      context += `Source: ${chunkSource}\n`;
-      addedSources.add(sourceIdentifier);
-    }
-    
-    context += `Content: ${chunk.content}\n\n`;
-    
-    if (context.length > config.brief.maxContextLength) {
-      context = context.substring(0, config.brief.maxContextLength);
-      break;
-    }
-  }
-  
-  return context;
-}
-
-function extractSources(relevantChunks) {
-  const sources = [];
-  const seen = new Set();
-
-  for (const chunk of relevantChunks) {
-    const sourceName = chunk.metadata?.source || 'unknown';
-    const source = {
-      name: sourceName,
-      url: chunk.metadata?.url || null,
-      title: chunk.metadata?.title || sourceName
-    };
-
-    const key = `${source.name}-${source.url}`;
-    if (!seen.has(key)) {
-      sources.push(source);
-      seen.add(key);
-    }
-  }
-
-  return sources;
-}
-
-function calculateConfidence(relevantChunks) {
-  if (relevantChunks.length === 0) return 0;
-
-  // calculate confidence based on:
-  // 1. number of sources
-  // 2. similarity scores
-  // 3. source quality
-  
-  const avgDistance = relevantChunks.reduce((sum, chunk) => sum + chunk.distance, 0) / relevantChunks.length;
-  const similarity = Math.max(0, 1 - avgDistance);
-  
-  // boost confidence for well-known sources
-  const qualitySources = relevantChunks.filter(chunk => 
-    chunk.metadata && chunk.metadata.source && 
-    ['wikipedia', 'britannica', 'science', 'nature', 'bbc', 'npr', 'mit', 'stanford'].some(site => 
-      chunk.metadata.source.includes(site)
-    )
-  ).length;
-
-  const qualityBoost = Math.min(qualitySources * 0.15, 0.4);
-  const sourceCountBoost = Math.min(relevantChunks.length * 0.1, 0.3);
-  
-  return Math.min(Math.round((similarity + qualityBoost + sourceCountBoost) * 100), 100);
-}
-
-module.exports = {
-  initializeRAG,
-  askQuestion,
-  learnTopic,
-  getKnowledgeStats,
-  forgetTopic,
-  listKnownTopics
-}; 
+module.exports = { RAGSystem }; 
