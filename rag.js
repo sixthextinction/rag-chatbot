@@ -108,7 +108,8 @@ async function generateAnswer(ollama, config, question, chunks, state) {
 
     console.log(`generating answer using ${chunks.length} chunks...`);
 
-    // choose system prompt dynamically
+    // choose system prompt dynamically based on allowModelKnowledge configuration
+    // this determines whether the model can supplement context with its own knowledge
     const hybridPrompt = `You are a helpful AI assistant with access to both context information and your own knowledge.
 
 INSTRUCTIONS:
@@ -120,7 +121,9 @@ INSTRUCTIONS:
 
 Remember: You have permission to use your internal knowledge when the context isn't useful.`;
 
-const strictPrompt = `You are a helpful AI assistant that can only use the provided context to answer questions.
+    // strict mode ensures the model only uses provided context, preventing hallucination
+    // but may result in "I don't know" responses for out-of-scope questions
+    const strictPrompt = `You are a helpful AI assistant that can only use the provided context to answer questions.
 
 STRICT RULES:
 1. Only use information from the provided context
@@ -129,13 +132,15 @@ STRICT RULES:
 4. Be accurate and only state what is explicitly supported by the context`;
 
 
+    // select the appropriate prompt based on configuration
+    // hybrid mode allows flexibility, strict mode ensures only context-based answers
     const systemPrompt = config.chat.allowModelKnowledge ? hybridPrompt : strictPrompt;
 
     const response = await ollama.chat({
       system: systemPrompt,
       prompt: prompt,
-      temperature: 0.2, // more creative
-      num_predict: 1024 // think more
+      temperature: 0.2, // low temperature for consistent, factual responses (0.0 = deterministic, 1.0 = very creative)
+      num_predict: 1024 // max tokens to generate - 1024 should balance thoroughness with response time
     });
 
     return {
@@ -156,27 +161,33 @@ function buildContext(chunks, config) {
   let currentLength = 0;
   const maxLength = config.rag.maxContextLength;
 
-  // prioritize chunks by relevance (distance) and type
+  // prioritize chunks by relevance (distance) and type for optimal context building
   const sortedChunks = chunks.sort((a, b) => {
-    // knowledge graph chunks get highest priority
+    // knowledge graph chunks get highest priority because they contain structured relationships
+    // between entities, which provides better context than raw text chunks
     if (a.metadata.type === 'knowledge_graph' && b.metadata.type !== 'knowledge_graph') {
-      return -1;
+      return -1; // a comes first
     }
     if (b.metadata.type === 'knowledge_graph' && a.metadata.type !== 'knowledge_graph') {
-      return 1;
+      return 1; // b comes first
     }
-    // then sort by distance (relevance)
+    // then sort by semantic similarity distance (lower distance = more relevant)
+    // this ensures the most relevant content appears first within the context window
     return a.distance - b.distance;
   });
 
+  // build context string while respecting the maximum length limit
   for (const chunk of sortedChunks) {
+    // format each chunk with source attribution for transparency and fact-checking
     const chunkText = `Source: ${chunk.metadata.source}\n${chunk.content}\n\n`;
 
+    // only include chunks that fit within the context window to avoid truncation
+    // which could cut off important information mid-sentence
     if (currentLength + chunkText.length <= maxLength) {
       context += chunkText;
       currentLength += chunkText.length;
     } else {
-      break;
+      break; // stop adding chunks once we hit the limit
     }
   }
 
@@ -209,7 +220,7 @@ function getRecentConversationContext(state) {
     return '';
   }
 
-  const recentHistory = state.conversationHistory.slice(-4); // last 2 exchanges
+  const recentHistory = state.conversationHistory.slice(-4); // last 2 exchanges (4 messages = 2 user + 2 assistant)
   return recentHistory
     .map(entry => `${entry.role}: ${entry.content}`)
     .join('\n');
@@ -223,20 +234,21 @@ function addToHistory(state, role, content) {
     timestamp: new Date().toISOString()
   });
 
-  // keep history manageable - this should probably be configurable
-  const maxHistoryLength = 20; // reasonable default
+  // keep history manageable to prevent memory bloat and maintain conversation focus
+  const maxHistoryLength = 20; // 20 messages = ~10 exchanges, balances context with performance
   if (state.conversationHistory.length > maxHistoryLength) {
     state.conversationHistory = state.conversationHistory.slice(-maxHistoryLength);
   }
 }
 
-// basic deduplication of chunks
+// basic deduplication of chunks to avoid redundant information in context
 function deduplicateChunks(chunks) {
   const seen = new Set();
   const unique = [];
 
   for (const chunk of chunks) {
-    // create a simple hash of the content
+    // create a simple hash using first 100 chars, normalized for case and whitespace
+    // this catches near-duplicates without being too strict (different sources may have slight variations)
     const contentHash = chunk.content.substring(0, 100).toLowerCase().replace(/\s+/g, ' ');
 
     if (!seen.has(contentHash)) {
@@ -248,15 +260,16 @@ function deduplicateChunks(chunks) {
   return unique;
 }
 
-// extract unique sources from chunks
+// extract unique sources from chunks for citation and transparency
 function extractSources(chunks) {
-  const sources = new Set();
+  const sources = new Set(); // use Set to automatically deduplicate source URLs
   chunks.forEach(chunk => {
+    // only include valid sources, filter out placeholder values
     if (chunk.metadata.source && chunk.metadata.source !== 'unknown') {
       sources.add(chunk.metadata.source);
     }
   });
-  return Array.from(sources);
+  return Array.from(sources); // convert back to array for consistent return type
 }
 
 // get current topic info
