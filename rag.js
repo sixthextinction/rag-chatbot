@@ -43,24 +43,8 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
     // retrieve relevant chunks
     const relevantChunks = await retrieveRelevantChunks(vectorContext, state.currentTopicId, sanitizedQuestion, config);
 
-    // allow model to answer using its own knowledge if allowModelKnowledge is true
-    if (relevantChunks.length === 0 && config.chat.allowModelKnowledge) {
-      const answer = await generateAnswer(ollama, config, sanitizedQuestion, [], state);
-
-      addToHistory(state, 'user', sanitizedQuestion);
-      addToHistory(state, 'assistant', answer.answer);
-
-      return {
-        answer: answer.answer,
-        sources: [],
-        chunks_used: 0,
-        topic: state.currentTopicId,
-        context_used: []
-      };
-    }
-
-    // fallback if hybrid mode is off
-    if (relevantChunks.length === 0) {
+    // fallback if hybrid mode is off and no chunks found
+    if (relevantChunks.length === 0 && !config.chat.allowModelKnowledge) {
       return {
         answer: "I don't have enough information in my knowledge base to answer that question.",
         sources: [],
@@ -69,7 +53,8 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
       };
     }
 
-    // generate answer using retrieved context
+    // generate answer - let the model decide whether to use chunks or its own knowledge
+    // the system prompt will guide this behavior based on allowModelKnowledge setting
     const answer = await generateAnswer(ollama, config, sanitizedQuestion, relevantChunks, state);
 
     // add to conversation history
@@ -94,78 +79,6 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
   }
 }
 
-// check for warning conditions about relevance and topic matching
-async function checkWarningConditions(vectorContext, currentTopicId, question, chunks, config) {
-  try {
-    // warning 1: check if all chunks have low similarity scores
-    if (config.warnings.enableSimilarityWarning && chunks.length > 0) {
-      // convert distance to similarity (chromadb uses cosine distance: similarity = 1 - distance)
-      const similarities = chunks.map(chunk => 1 - chunk.distance);
-      
-      if (similarities.every(similarity => similarity < config.warnings.lowSimilarityThreshold)) {
-        const maxSimilarity = Math.max(...similarities);
-        console.warn(`[⚠️] Retrieved chunks may not be relevant to the question. Highest similarity: ${maxSimilarity.toFixed(3)}. Consider broadening the scope or rephrasing the question.`);
-      }
-    }
-
-    // warning 2: check if question intent doesn't semantically match the topic
-    if (config.warnings.enableTopicMismatchWarning) {
-      await checkTopicMismatch(vectorContext, currentTopicId, question, config);
-    }
-  } catch (error) {
-    console.error('❌ warning check failed:', error.message);
-    // don't throw - warnings should not break the flow
-  }
-}
-
-// check if the question semantically matches the current topic
-async function checkTopicMismatch(vectorContext, currentTopicId, question, config) {
-  try {
-    // create a simple topic description query to compare against
-    const topicQuery = `what is ${currentTopicId.replace(/_/g, ' ')}`;
-    
-    // get embeddings for both the question and the topic
-    const questionEmbedding = await vectorContext.embeddingFunction.generate([question]);
-    const topicEmbedding = await vectorContext.embeddingFunction.generate([topicQuery]);
-    
-    // calculate cosine similarity between question and topic embeddings
-    const similarity = calculateCosineSimilarity(questionEmbedding[0], topicEmbedding[0]);
-    
-    if (similarity < config.warnings.topicMismatchThreshold) {
-      console.warn(`[⚠️] Question intent may not match the current topic "${currentTopicId}". Similarity: ${similarity.toFixed(3)}. Consider switching topics or rephrasing the question.`);
-    }
-  } catch (error) {
-    console.error('❌ topic mismatch check failed:', error.message);
-    // don't throw - this is just a warning
-  }
-}
-
-// calculate cosine similarity between two vectors
-function calculateCosineSimilarity(vecA, vecB) {
-  if (vecA.length !== vecB.length) {
-    throw new Error('vectors must have the same length');
-  }
-  
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  
-  normA = Math.sqrt(normA);
-  normB = Math.sqrt(normB);
-  
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-  
-  return dotProduct / (normA * normB);
-}
-
 // retrieve relevant chunks for the question
 async function retrieveRelevantChunks(vectorContext, currentTopicId, question, config) {
   try {
@@ -178,9 +91,6 @@ async function retrieveRelevantChunks(vectorContext, currentTopicId, question, c
 
     // filter out chunks that are too similar (basic deduplication)
     const uniqueChunks = deduplicateChunks(chunks);
-
-    // check for warning conditions
-    await checkWarningConditions(vectorContext, currentTopicId, question, uniqueChunks, config);
 
     console.log(`retrieved ${uniqueChunks.length} relevant chunks`);
     return uniqueChunks;
@@ -199,22 +109,24 @@ async function generateAnswer(ollama, config, question, chunks, state) {
     console.log(`generating answer using ${chunks.length} chunks...`);
 
     // choose system prompt dynamically
-    const hybridPrompt = `You are a helpful AI assistant that answers user questions.
+    const hybridPrompt = `You are a helpful AI assistant with access to both context information and your own knowledge.
 
-Use the context provided **if it's helpful**. If the context is unrelated or missing the answer, feel free to use your own knowledge.
+INSTRUCTIONS:
+1. Evaluate if the provided context is relevant and helpful for answering the question
+2. If the context directly addresses the question, use it as your primary source
+3. If the context is irrelevant, incomplete, or doesn't contain the answer, IGNORE it and use your own knowledge instead
+4. Do NOT say "the context doesn't contain this information" - just answer the question using your knowledge
+5. Be natural, helpful, and informative in your responses
 
-Clearly prefer context when it's available and relevant — otherwise, use internal knowledge to answer accurately.
+Remember: You have permission to use your internal knowledge when the context isn't useful.`;
 
-Be concise and informative.`;
+const strictPrompt = `You are a helpful AI assistant that can only use the provided context to answer questions.
 
-
-
-const strictPrompt = `You are a helpful AI assistant.
-
-Only answer questions using the provided context. If the context doesn't contain enough information, say:
-"I don't have enough information in my knowledge base to answer that question."
-
-Do not use your internal knowledge, even if you know the answer.`;
+STRICT RULES:
+1. Only use information from the provided context
+2. If the context doesn't contain enough information to answer the question, respond with: "I don't have enough information in my knowledge base to answer that question."
+3. Never use your internal knowledge, even if you know the answer
+4. Be accurate and only state what is explicitly supported by the context`;
 
 
     const systemPrompt = config.chat.allowModelKnowledge ? hybridPrompt : strictPrompt;
@@ -275,11 +187,8 @@ function buildContext(chunks, config) {
 function buildPrompt(question, context, state, allowModelKnowledge) {
   const conversationContext = getRecentConversationContext(state);
 
-  let prompt = allowModelKnowledge
-    ? `You are an expert assistant. If the context below answers the question, use it. If the context is missing or unrelated, use your own knowledge.\n\n`
-    : `You are an expert assistant. Answer the user's question using only the context below. If the context doesn't have the answer, say "I don't know."\n\n`;
-
-  prompt += `--- CONTEXT START ---\n${context || 'No relevant context found.'}\n--- CONTEXT END ---\n`;
+  // build prompt without conflicting instructions - let system prompt handle the behavior
+  let prompt = `--- CONTEXT START ---\n${context || 'No relevant context found.'}\n--- CONTEXT END ---\n`;
 
   if (conversationContext) {
     prompt += `\n\n--- RECENT CONVERSATION ---\n${conversationContext}`;
