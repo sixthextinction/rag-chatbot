@@ -285,8 +285,6 @@ async function handleChatQuestion(question) {
       console.log();
     }
 
-    console.log(`Used ${response.chunks_used} knowledge chunks\n`);
-
   } catch (error) {
     console.log(`\n┌${'─'.repeat(78)}┐`);
     console.log('│                        ❌ FAILED TO ANSWER QUESTION                     │');

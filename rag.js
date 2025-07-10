@@ -28,6 +28,38 @@ async function setTopic(state, vectorContext, topicId) {
   return true;
 }
 
+// check if question is relevant to the current topic using LLM
+async function checkQuestionRelevance(ollama, question, topicId) {
+  try {
+    const systemPrompt = `You are a topic relevance checker. Your job is to determine if a user's question is related to a specific topic.
+
+INSTRUCTIONS:
+1. Analyze if the question is asking about, discussing, or seeking information related to the given topic
+2. Consider direct mentions, implied connections, and contextual relationships
+3. Respond with ONLY "RELEVANT" or "NOT_RELEVANT" - no other text
+4. Be generous with relevance - only mark as NOT_RELEVANT if the question is clearly about something completely different`;
+
+    const prompt = `Topic: "${topicId}"
+Question: "${question}"
+
+Is this question relevant to the topic?`;
+
+    const response = await ollama.chat({
+      system: systemPrompt,
+      prompt: prompt,
+      temperature: 0.1, // very low temperature for consistent relevance decisions
+      num_predict: 20 // short response needed
+    });
+
+    const result = response.message.content.trim().toUpperCase();
+    return result === 'RELEVANT';
+  } catch (error) {
+    console.error('❌ failed to check question relevance:', error.message);
+    // default to relevant if check fails to avoid breaking the flow
+    return true;
+  }
+}
+
 // answer a question using RAG
 async function answerQuestion(state, vectorContext, ollama, config, question) {
   if (!state.currentTopicId) {
@@ -40,6 +72,10 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
   }
 
   try {
+    // check if question is relevant to current topic
+    const isRelevant = await checkQuestionRelevance(ollama, sanitizedQuestion, state.currentTopicId);
+    // console.log(`Question relevance check: ${isRelevant ? 'RELEVANT' : 'NOT_RELEVANT'}`);
+
     // retrieve relevant chunks
     const relevantChunks = await retrieveRelevantChunks(vectorContext, state.currentTopicId, sanitizedQuestion, config);
 
@@ -61,9 +97,15 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
     addToHistory(state, 'user', sanitizedQuestion);
     addToHistory(state, 'assistant', answer.answer);
 
+    // prepare final answer with relevance disclaimer if needed
+    let finalAnswer = answer.answer;
+    if (!isRelevant) {
+      finalAnswer = `FYI, this question doesn't exactly seem relevant to the current topic "${state.currentTopicId}"\n\n${answer.answer}`;
+    }
+
     return {
-      answer: answer.answer,
-      sources: extractSources(relevantChunks),
+      answer: finalAnswer,
+      sources: isRelevant ? extractSources(relevantChunks) : [], // no sources for off-topic questions
       chunks_used: relevantChunks.length,
       topic: state.currentTopicId,
       context_used: relevantChunks.map(chunk => ({
@@ -92,10 +134,10 @@ async function retrieveRelevantChunks(vectorContext, currentTopicId, question, c
     // filter out chunks that are too similar (basic deduplication)
     const uniqueChunks = deduplicateChunks(chunks);
 
-    console.log(`retrieved ${uniqueChunks.length} relevant chunks`);
+    console.log(`Retrieved ${uniqueChunks.length} relevant chunks.`);
     return uniqueChunks;
   } catch (error) {
-    console.error('❌ failed to retrieve chunks:', error.message);
+    console.error('❌ Failed to retrieve chunks:', error.message);
     return [];
   }
 }
@@ -106,10 +148,10 @@ async function generateAnswer(ollama, config, question, chunks, state) {
     const context = buildContext(chunks, config);
     const prompt = buildPrompt(question, context, state, config.chat.allowModelKnowledge);
 
-    console.log(`generating answer using ${chunks.length} chunks...`);
+    console.log(`Generating answer using ${chunks.length} chunks...`);
 
     // choose system prompt dynamically based on allowModelKnowledge configuration
-    // this determines whether the model can supplement context with its own knowledge
+    // 1. this prompt says the model CAN supplement context with its own knowledge
     const hybridPrompt = `You are a helpful AI assistant with access to both context information and your own knowledge.
 
 INSTRUCTIONS:
@@ -121,8 +163,8 @@ INSTRUCTIONS:
 
 Remember: You have permission to use your internal knowledge when the context isn't useful.`;
 
-    // strict mode ensures the model only uses provided context, preventing hallucination
-    // but may result in "I don't know" responses for out-of-scope questions
+    // 2. this prompt, the strict mode one, ensures the model ONLY uses provided context, preventing hallucination
+    // this WILL result in a lot of "I don't know" responses for questions (especially follow up prompts) that cant be answered by the context alone
     const strictPrompt = `You are a helpful AI assistant that can only use the provided context to answer questions.
 
 STRICT RULES:
@@ -132,7 +174,7 @@ STRICT RULES:
 4. Be accurate and only state what is explicitly supported by the context`;
 
 
-    // select the appropriate prompt based on configuration
+    // select the appropriate prompt of the two, based on configuration
     // hybrid mode allows flexibility, strict mode ensures only context-based answers
     const systemPrompt = config.chat.allowModelKnowledge ? hybridPrompt : strictPrompt;
 

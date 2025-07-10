@@ -31,7 +31,7 @@ async function initializeVectorStore(config, ollama) {
     
     return { client, embeddingFunction, config };
   } catch (error) {
-    console.error('❌ failed to initialize ChromaDB:', error.message);
+    console.error('❌ Failed to initialize ChromaDB:', error.message);
     throw error;
   }
 }
@@ -65,7 +65,7 @@ async function getTopicCollection(vectorContext, topicId) {
     
     return collection;
   } catch (error) {
-    console.error(`❌ failed to get/create collection for topic ${topicId}:`, error.message);
+    console.error(`❌ Failed to get/create collection for topic ${topicId}:`, error.message);
     throw error;
   }
 }
@@ -113,7 +113,7 @@ async function storeTopicChunks(vectorContext, topicId, chunks) {
     console.log(`[✅ STORED ${chunks.length} CHUNKS FOR TOPIC: ${topicId}]`);
     return { success: true, stored_count: chunks.length };
   } catch (error) {
-    console.error('❌ failed to store chunks:', error.message);
+    console.error('❌ Failed to store chunks:', error.message);
     throw error;
   }
 }
@@ -142,10 +142,9 @@ async function searchTopicChunks(vectorContext, topicId, query, nResults = 8) {
       });
     }
 
-    console.log(`[FOUND ${formattedResults.length} RELEVANT CHUNKS FOR TOPIC: ${topicId}]`);
     return formattedResults;
   } catch (error) {
-    console.error(`❌ failed to search chunks for topic ${topicId}:`, error.message);
+    console.error(`❌ Failed to search chunks for topic ${topicId}:`, error.message);
     throw error;
   }
 }
@@ -164,7 +163,7 @@ async function getTopicChunks(vectorContext, topicId) {
       id: results.ids[i]
     }));
   } catch (error) {
-    console.error(`❌ failed to get topic chunks for ${topicId}:`, error.message);
+    console.error(`❌ Failed to get topic chunks for ${topicId}:`, error.message);
     throw error;
   }
 }
@@ -198,7 +197,7 @@ async function listTopics(vectorContext) {
     console.log(`Found ${topicIds.length} stored topics.`);
     return topicIds;
   } catch (error) {
-    console.error('❌ failed to list topics:', error.message);
+    console.error('❌ Failed to list topics:', error.message);
     throw error;
   }
 }
@@ -225,20 +224,20 @@ async function topicExists(vectorContext, topicId) {
     const { client, config } = vectorContext;
     const collectionName = `${config.vectorDb.baseCollectionName}_${topicId}`;
     
-    console.log(`[DEBUG: CHECKING FOR COLLECTION: ${collectionName}]`);
+    console.log(`[CHECKING FOR COLLECTION: ${collectionName}]`);
     
     // try to get the collection directly - more reliable than listing all collections
     try {
       await client.getCollection({ name: collectionName });
-      console.log(`[DEBUG: COLLECTION FOUND: ${collectionName}]`);
+      console.log(`[COLLECTION FOUND: ${collectionName}]`);
       return true;
     } catch (getError) {
       // if getCollection fails, the collection doesn't exist
-      console.log(`[DEBUG: COLLECTION NOT FOUND: ${collectionName}, ERROR: ${getError.message}]`);
+      console.log(`[COLLECTION NOT FOUND: ${collectionName}, ERROR: ${getError.message}]`);
       return false;
     }
   } catch (error) {
-    console.error(`❌ failed to check if topic exists ${topicId}:`, error.message);
+    console.error(`❌ Failed to check if topic exists ${topicId}:`, error.message);
     return false;
   }
 }
@@ -271,7 +270,7 @@ async function getTopicStats(vectorContext, topicId) {
       collection_name: `${vectorContext.config.vectorDb.baseCollectionName}_${topicId}`
     };
   } catch (error) {
-    console.error(`❌ failed to get stats for topic ${topicId}:`, error.message);
+    console.error(`❌ Failed to get stats for topic ${topicId}:`, error.message);
     throw error;
   }
 }

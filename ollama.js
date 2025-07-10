@@ -1,13 +1,13 @@
 /*
-  ollama API endpoints used in this client (for more info, see https://ollama.readthedocs.io/en/api/):
+  Ollama API endpoints used in this client (for more info, see https://ollama.readthedocs.io/en/api/):
   - GET /api/tags: check available models
   - POST /api/embeddings: generate embeddings for a given prompt
   - POST /api/chat: generate a chat completion with support for system prompts and message history
-  - POST /api/pull: pull a model from the ollama model registry (honestly, optional. Just a quality of life thing. Makes it more 'production ready'.)
+  - POST /api/pull: pull a model from the ollama model registry (honestly, optional. Just a quality of life thing. Makes our chatbot more 'production ready'.)
 
-  some quick notes:
+  Some quick notes:
   - unless configured otherwise, the /api calls here are hitting the ollama
-    local server — typically running at http://localhost:11434. this is the ollama HTTP api (duh), which
+    local server running at http://localhost:11434. this is the ollama HTTP api (duh), which
     exposes several prebuilt endpoints to interact with models you've downloaded/are running.
   - these apis run on your machine by default and have no authentication. so make sure:
     - they're not exposed to external networks
@@ -15,9 +15,8 @@
 */
 const fetch = require('node-fetch');
 
-// wrapping ollama api calls in a class so we don't have to pass config around everywhere
-// This is pretty analogous to how you'd build a PostgresClient, StripeClient, or OpenAIClient. 
-// These are naturally stateful, reusable abstractions and so best served with classes
+// this is pretty analogous to how you'd build a PostgresClient, StripeClient, or OpenAIClient. 
+// these are naturally stateful, reusable abstractions and so best served with classes
 class OllamaClient {
   constructor(config) {
     this.host = config.ollama.host;
@@ -118,9 +117,9 @@ class OllamaClient {
           messages: messages,
           stream: false, // TODO: replace node-fetch with axios/undici and add streaming support
           options: {
-            temperature: options.temperature || 0.7, // balanced creativity vs consistency
-            top_p: options.top_p || 0.9, // nucleus sampling - keeps most probable tokens while allowing some variety
-            num_predict: options.num_predict || 512 // feels like a reasonable response length for chat...
+            temperature: options.temperature || 0.5, // start with a balanced creativity vs consistency, then tune accordingly in ./rag.js
+            top_p: 0.9, // nucleus sampling for vocab size - balanced creativity vs coherence
+            num_predict: options.num_predict || 512 // feels like a reasonable response length for chat...tune accordingly in ./rag.js
           }
         })
       });
@@ -137,7 +136,7 @@ class OllamaClient {
     }
   }
 
-  // pull a model if it's not available
+  // pull a model if it's not available; pretty much a QOL thing, pull manually if you want
   async pullModel(modelName) {
     try {
       console.log(`pulling model: ${modelName}...`);
