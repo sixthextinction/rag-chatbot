@@ -16,6 +16,8 @@
 const fetch = require('node-fetch');
 
 // wrapping ollama api calls in a class so we don't have to pass config around everywhere
+// This is pretty analogous to how you'd build a PostgresClient, StripeClient, or OpenAIClient. 
+// These are naturally stateful, reusable abstractions and so best served with classes
 class OllamaClient {
   constructor(config) {
     this.host = config.ollama.host;

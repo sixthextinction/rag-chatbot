@@ -3,7 +3,7 @@ const CONFIG = require('./config');
 const { OllamaClient } = require('./ollama');
 const { initializeVectorStore, storeTopicChunks, listTopics, getTopicStats, topicExists } = require('./vectorstore');
 const { researchTopic } = require('./search');
-const { RAGSystem } = require('./rag');
+const { createRAGState, setTopic, answerQuestion, clearHistory } = require('./rag');
 const { generateTopicId, validateTopic } = require('./utils');
 const { clearExpiredCache } = require('./cache');
 
@@ -11,7 +11,7 @@ const { clearExpiredCache } = require('./cache');
 let config = CONFIG;
 let ollama = null;
 let vectorContext = null;
-let ragSystem = null;
+let ragState = null;
 let rl = null;
 let currentPhase = 'TOPIC_INGESTION'; // or 'CHAT'
 let currentTopic = null;
@@ -51,10 +51,10 @@ async function initialize() {
     vectorContext = await initializeVectorStore(config, ollama);
     console.log('└─ ✅ Vector store initialized\n');
 
-    // initialize RAG system
-    console.log('┌─ Initializing RAG system...');
-    ragSystem = new RAGSystem(vectorContext, ollama, config);
-    console.log('└─ ✅ RAG system initialized');
+    // initialize RAG state
+    console.log('┌─ Initializing RAG state...');
+    ragState = createRAGState();
+    console.log('└─ ✅ RAG state initialized');
 
     // setup readline interface
     rl = readline.createInterface({
@@ -265,7 +265,7 @@ async function handleChatQuestion(question) {
     console.log('│                              THINKING...                                │');
     console.log(`└${'─'.repeat(78)}┘\n`);
 
-    const response = await ragSystem.answerQuestion(question);
+    const response = await answerQuestion(ragState, vectorContext, ollama, config, question);
 
     console.log(`${'═'.repeat(80)}`);
     console.log('                                  ANSWER');
@@ -303,7 +303,7 @@ async function handleChatQuestion(question) {
 async function switchToChat(topicId, topicName) {
   try {
     console.log(`┌─ Verifying topic exists: ${topicId}`);
-    await ragSystem.setTopic(topicId);
+    await setTopic(ragState, vectorContext, topicId);
     currentPhase = 'CHAT';
     currentTopic = topicName;
 
@@ -359,8 +359,8 @@ async function handleSpecialCommands(input) {
       return true;
 
     case 'clear':
-      if (ragSystem) {
-        ragSystem.clearHistory();
+      if (ragState) {
+        clearHistory(ragState);
         console.log('✅ conversation history cleared\n');
       }
       return true;

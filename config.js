@@ -15,7 +15,7 @@ const CONFIG = {
   // ollama configuration for local LLM
   ollama: {
     host: 'http://localhost:11434',
-    generationModel: 'gemma3:1b',
+    generationModel: 'gemma3:4b',
     embeddingModel: 'nomic-embed-text:latest'
   },
 
@@ -27,7 +27,10 @@ const CONFIG = {
 
   // search configuration for comprehensive topic research
   search: {
-    maxSearchQueries: 8, // comprehensive research queries
+    maxSearchQueries: 8, // that should be enough for each
+
+    // these are only really useful for technical things 
+    // TODO: add more for other things too
     searchTemplates: [
       // fundamental understanding
       'what is {topic}?',
@@ -64,7 +67,7 @@ const CONFIG = {
   // caching settings
   cache: {
     dir: 'cache',
-    expiryDays: 2 // fresh data for current topics
+    expiryDays: 2 // 2 days should ensure fresh data for current topics
   },
 
   // request settings
@@ -84,9 +87,7 @@ const CONFIG = {
   // chatbot interaction settings
   chat: {
     maxHistoryLength: 10, // keep recent conversation context
-    systemPrompt: `You are a helpful AI assistant that answers questions about specific topics using provided context. 
-Always base your answers on the given context. If the context doesn't contain enough information to answer the question, 
-say "I don't have enough information in my knowledge base to answer that question." Be concise but informative.`
+    allowModelKnowledge: true // should the model be allowed to answer using its own knowledge if context doesnt contain the answer?
   }
 };
 
