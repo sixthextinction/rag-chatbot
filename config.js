@@ -88,6 +88,14 @@ const CONFIG = {
   chat: {
     maxHistoryLength: 10, // keep recent conversation context
     allowModelKnowledge: true // should the model be allowed to answer using its own knowledge if context doesnt contain the answer?
+  },
+
+  // warning system settings
+  warnings: {
+    lowSimilarityThreshold: 0.4, // warn if all chunks have similarity below this threshold
+    topicMismatchThreshold: 0.3, // warn if question doesn't semantically match topic
+    enableTopicMismatchWarning: true, // enable/disable topic mismatch warnings
+    enableSimilarityWarning: true // enable/disable similarity warnings
   }
 };
 

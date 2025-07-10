@@ -56,6 +56,12 @@ async function initialize() {
     ragState = createRAGState();
     console.log('└─ ✅ RAG state initialized');
 
+    // show warning system status
+    console.log('┌─ Warning system configuration:');
+    console.log(`├─ • Similarity warnings: ${config.warnings.enableSimilarityWarning ? '✅ enabled' : '❌ disabled'} (threshold: ${config.warnings.lowSimilarityThreshold})`);
+    console.log(`└─ • Topic mismatch warnings: ${config.warnings.enableTopicMismatchWarning ? '✅ enabled' : '❌ disabled'} (threshold: ${config.warnings.topicMismatchThreshold})`);
+    console.log();
+
     // setup readline interface
     rl = readline.createInterface({
       input: process.stdin,
