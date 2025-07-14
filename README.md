@@ -1,35 +1,35 @@
 # RAG Chatbot
 
-A tutorial RAG-based chatbot system that researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
+A tutorial-scale, fully local RAG-based chatbot built with Gemma 3 via Ollama + Bright Data SERP API + Chroma. This researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
 
 ## Features
 
 - **Two-Phase Operation**: Research topics first, then engage in Q&A
-- **Comprehensive Topic Research**: Uses 20+ search templates for thorough coverage
+- **Comprehensive Topic Research**: Uses 20+ search templates for thorough coverage via Bright Data SERP
 - **Local LLM Integration**: Powered by Ollama with Gemma models
 - **Vector Database Storage**: ChromaDB for efficient similarity search
 - **Intelligent Caching**: Reduces API calls and improves performance
 - **Topic Management**: Switch between different research topics
 - **Conversation History**: Maintains context during Q&A sessions
 
-## 📋 Prerequisites
+## Prerequisites
 
-1. **Node.js** (v16 or higher)
-2. **Ollama** installed and running locally
-3. **ChromaDB** (automatically handled by the chromadb package)
+1. **Node.js** 
+2. **Ollama** installed and running locally 
+3. **ChromaDB** (automatically handled by the chromadb package) + Docker (get this yourself)
 4. **Bright Data SERP API** credentials
 
 ### Required Ollama Models
 
 The system will automatically attempt to pull these models if missing:
-- `gemma3:1b` (text generation)
+- `gemma3:4b-it-qat` (text generation)
 - `nomic-embed-text:latest` (embeddings)
 
 ## Installation
 
 1. **Clone or navigate to the project directory**:
    ```bash
-   cd rag-chatbot-v2
+   cd rag-chatbot
    ```
 
 2. **Install dependencies**:
@@ -128,7 +128,7 @@ The system is highly configurable through `config.js`:
 ## Project Structure
 
 ```
-rag-chatbot-v2/
+rag-chatbot/
 ├── main.js           # Main application and interaction loop
 ├── config.js         # System configuration
 ├── ollama.js         # Ollama client for local LLM
