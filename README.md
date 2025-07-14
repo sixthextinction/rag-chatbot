@@ -2,6 +2,16 @@
 
 A tutorial-scale, fully local RAG-based chatbot built with Gemma 3 via Ollama + Bright Data SERP API + Chroma. This researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
 
+## Results
+
+### Before vs After
+
+<p>
+  <img src="https://github.com/sixthextinction/rag-chatbot/blob/main/before.png" alt="Before RAG" width="45%" />
+  <img src="https://github.com/sixthextinction/rag-chatbot/blob/main/after.png" alt="After RAG" width="45%" />
+</p>
+
+
 ## Features
 
 - **Two-Phase Operation**: Research topics first, then engage in Q&A
