@@ -73,13 +73,14 @@ async function researchTopic(topic, config) {
   const searchResults = [];
   const topicId = generateTopicId(topic);
 
-  console.log(`researching topic: ${topic}`);
-  console.log(`using ${config.search.searchTemplates.length} search templates`);
+  console.log(`\nResearching topic: ${topic}`);
+  console.log(`Using ${config.search.searchTemplates.length} search templates`);
+  console.log(`\nThis may take a few minutes...\n`);
   
-  // execute searches using each template
+  // execute searches (via SERP API) using each template
   for (let i = 0; i < config.search.searchTemplates.length; i++) {
     const template = config.search.searchTemplates[i];
-    const searchQuery = buildTopicSearchQuery(template, topic);
+    const searchQuery = template.replace('{topic}', topic);
     
     try {
       // add delay between requests to avoid rate limiting
@@ -95,12 +96,12 @@ async function researchTopic(topic, config) {
       allChunks.push(...chunks);
       
     } catch (error) {
-      console.warn(`search failed for template "${template}": ${error.message}`);
+      console.warn(`Search failed for template "${template}": ${error.message}`);
       // continue with other searches even if one fails
     }
   }
 
-  console.log(`collected ${allChunks.length} total chunks for ${topic}`);
+  console.log(`Collected ${allChunks.length} total chunks for ${topic}`);
   
   // extract unique sources from all chunks
   const uniqueSources = [...new Set(allChunks.map(chunk => chunk.source))];
@@ -206,10 +207,6 @@ function processSearchResults(searchResults, topic, topicId, searchTemplate, con
 }
 
 // helper functions
-function buildTopicSearchQuery(template, topic) {
-  return template.replace('{topic}', topic);
-}
-
 function getTemplateKey(template) {
   const parts = template.split(' ');
   let templateKey = parts[0] === '{topic}' && parts.length > 1 ? parts[1] : parts[0];
@@ -231,7 +228,6 @@ module.exports = {
   researchTopic,
   fetchTopicData,
   processSearchResults,
-  buildTopicSearchQuery,
   getSearchType,
   getTemplateKey
 }; 

@@ -15,7 +15,10 @@ const CONFIG = {
   // ollama configuration for local LLM
   ollama: {
     host: 'http://localhost:11434',
-    generationModel: 'gemma3:4b',
+    // generationModel: 'gemma3:1b',
+    // generationModel: 'gemma3:4b',
+    // generationModel: 'deepseek-r1:1.5b',
+    generationModel: 'gemma3:4b-it-qat',
     embeddingModel: 'nomic-embed-text:latest'
   },
 

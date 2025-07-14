@@ -116,7 +116,7 @@ async function showWelcomeMessage() {
   console.log(`┌${'─'.repeat(78)}┐`);
   console.log('│                               COMMANDS                                   │');
   console.log(`├${'─'.repeat(78)}┤`);
-  console.log('│ • Enter topic name: Research and learn about a topic                    │');
+  console.log('│ • Enter a topic : Research and learn about a topic                      │');
   console.log('│ • "list": Show all available topics                                     │');
   console.log('│ • "stats <topic>": Show statistics for a topic                          │');
   console.log('│ • "switch <topic>": Switch to Q&A mode for an existing topic            │');
@@ -195,7 +195,7 @@ async function handleTopicIngestion(input) {
   const exists = await topicExists(vectorContext, topicId);
   if (exists) {
     console.log(`\n┌${'─'.repeat(78)}┐`);
-    console.log('│                          📚 TOPIC FOUND                                 │');
+    console.log('│                          TOPIC FOUND!                                 │');
     console.log(`├${'─'.repeat(78)}┤`);
     const topicMsg = `Topic "${input}" already exists in knowledge base`;
     const padding = 76 - topicMsg.length;
@@ -237,9 +237,8 @@ async function handleTopicIngestion(input) {
     console.log('Ensuring database consistency...');
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    console.log('Switching to Q&A mode...\n');
-
     // switch to chat mode
+    console.log('Switching to Q&A mode...\n');
     await switchToChat(topicId, input);
 
   } catch (error) {

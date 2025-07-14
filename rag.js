@@ -14,7 +14,7 @@ function createRAGState() {
 // set the current topic for the conversation
 async function setTopic(state, vectorContext, topicId) {
   const exists = await topicExists(vectorContext, topicId);
-  console.log(`It ${exists ? 'does.' : 'does not.'}`);
+  // console.log(`It ${exists ? 'does.' : 'does not.'}`);
 
   if (!exists) {
     throw new Error(`Topic "${topicId}" not found in knowledge base`);
@@ -72,8 +72,8 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
   }
 
   try {
-    // check if question is relevant to current topic
-    const isRelevant = await checkQuestionRelevance(ollama, sanitizedQuestion, state.currentTopicId);
+    // OPTIONAL: Check if question is relevant to current topic
+    // const isRelevant = await checkQuestionRelevance(ollama, sanitizedQuestion, state.currentTopicId);
     // console.log(`Question relevance check: ${isRelevant ? 'RELEVANT' : 'NOT_RELEVANT'}`);
 
     // retrieve relevant chunks
@@ -99,13 +99,14 @@ async function answerQuestion(state, vectorContext, ollama, config, question) {
 
     // prepare final answer with relevance disclaimer if needed
     let finalAnswer = answer.answer;
-    if (!isRelevant) {
-      finalAnswer = `FYI, this question doesn't exactly seem relevant to the current topic "${state.currentTopicId}"\n\n${answer.answer}`;
-    }
+    // if (!isRelevant) {
+    //   finalAnswer = `FYI, this question doesn't exactly seem relevant to the current topic "${state.currentTopicId}"\n\n${answer.answer}`;
+    // }
 
     return {
       answer: finalAnswer,
-      sources: isRelevant ? extractSources(relevantChunks) : [], // no sources for off-topic questions
+      // sources: isRelevant ? extractSources(relevantChunks) : ["Gemma internal knowledge"], // no sources for off-topic questions
+      sources:extractSources(relevantChunks), 
       chunks_used: relevantChunks.length,
       topic: state.currentTopicId,
       context_used: relevantChunks.map(chunk => ({
