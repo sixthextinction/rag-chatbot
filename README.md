@@ -1,6 +1,6 @@
-# RAG Chatbot v2
+# RAG Chatbot
 
-A sophisticated RAG-based chatbot system that researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
+A tutorial RAG-based chatbot system that researches topics comprehensively and then answers questions using retrieval-augmented generation. The system operates in two distinct phases: **Topic Ingestion** and **Chat Mode**.
 
 ## Features
 
@@ -107,53 +107,6 @@ The system will:
 - **`back`**: Return to topic selection mode (when in chat)
 - **`quit`** or **`exit`**: Exit the chatbot
 
-### Example Session
-
-```
-enter topic to research (or command): Rust programming language
-
-starting research for topic: Rust programming language
-this may take a few minutes...
-
-searching for: what is Rust programming language?
-✅ found 10 organic results
-searching for: Rust programming language explained simply
-✅ found 8 organic results
-... (continues for all search templates)
-
-collected 156 total chunks for Rust programming language
-storing knowledge in vector database...
-✅ stored 156 chunks for topic: rust_programming_language
-✅ research complete for "Rust programming language"!
-collected 156 chunks from 12 sources
-switching to Q&A mode...
-
-now in Q&A mode for: Rust programming language
-ask me anything about this topic!
-
-[Rust programming language] your question: What makes Rust memory safe?
-
-thinking...
-
-answer:
-Rust achieves memory safety through its ownership system, which prevents common memory bugs like buffer overflows, use-after-free, and memory leaks. The key mechanisms include:
-
-1. **Ownership**: Each value has a single owner, and when the owner goes out of scope, the value is automatically deallocated.
-
-2. **Borrowing**: References that allow you to use a value without taking ownership, with compile-time checks to ensure references don't outlive the data they point to.
-
-3. **Lifetimes**: Annotations that ensure references are valid for as long as needed.
-
-These features are enforced at compile time, meaning memory safety violations are caught before the program runs, without requiring a garbage collector.
-
-sources:
-  • rust-lang.org
-  • doc.rust-lang.org
-  • github.com
-
-used 6 knowledge chunks
-```
-
 ## Configuration
 
 The system is highly configurable through `config.js`:
@@ -208,7 +161,7 @@ rag-chatbot-v2/
 4. **Answer Generation**: Uses local LLM to generate response based on context
 5. **Source Attribution**: Provides citations for transparency
 
-## Advanced Features
+## Other Features
 
 ### Topic Management
 - Each topic gets its own ChromaDB collection
@@ -245,6 +198,15 @@ rag-chatbot-v2/
 4. **ChromaDB Issues**
    - ChromaDB runs automatically with the Node.js client
    - Clear database: delete the `chroma_db` directory
+   - **Complete ChromaDB Reset**: Use the provided PowerShell script for a full reset:
+     ```powershell
+     .\cleanup_chromadb.ps1
+     ```
+     This script will:
+     - Stop the running ChromaDB Docker container
+     - Remove the container and its data volume
+     - Start a fresh ChromaDB container with clean data
+     - Useful when you need to completely reset your vector database
 
 ### Performance Tips
 
@@ -254,19 +216,10 @@ rag-chatbot-v2/
 
 ## System Requirements
 
-- **RAM**: 4GB minimum (8GB recommended for larger topics)
-- **Storage**: Varies by number of topics (typically 100MB-1GB per topic)
-- **Network**: Stable internet for search API calls
-- **CPU**: Modern multi-core processor for embedding generation
+- The models need about 4.5-5 GB of free space
+- Gemma 3 can run on a single consumer-tier dGPU
+- Gemma 3 4B IT QAT and ChromaDB running together should use about 6 GB VRAM at peak
 
-## Future Enhancements
-
-- Web interface for easier interaction
-- Support for document upload and processing
-- Multi-language support
-- Advanced search query optimization
-- Integration with additional search providers
-- Export functionality for research reports
 
 ## License
 
@@ -274,4 +227,3 @@ MIT License - see the original project for license details.
 
 ---
 
-**Note**: This is an advanced RAG system designed for comprehensive topic research and Q&A. Ensure you have the necessary API credentials and local infrastructure before starting. 
