@@ -70,6 +70,10 @@ The system will automatically attempt to pull these models if missing:
    ```bash
    ollama serve
    ```
+5. **Start Docker for Chroma** (if not already running):
+   ```bash
+   docker run -d - name chromadb -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
+   ```
 
 ## Usage
 
