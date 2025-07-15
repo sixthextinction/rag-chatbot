@@ -198,7 +198,7 @@ rag-chatbot/
 
 2. **Missing Models**
    - The system will automatically attempt to pull missing models
-   - Manually pull: `ollama pull gemma3:1b` and `ollama pull nomic-embed-text`
+   - Manually pull: `ollama pull gemma3:4b-it-qat` and `ollama pull nomic-embed-text`
 
 3. **Search API Errors**
    - Verify Bright Data credentials in `.env`
