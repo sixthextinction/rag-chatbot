@@ -22,6 +22,13 @@ A tutorial-scale, fully local RAG-based chatbot built with Gemma 3 via Ollama + 
 - **Topic Management**: Switch between different research topics
 - **Conversation History**: Maintains context during Q&A sessions
 
+## System Requirements
+
+- The models need about 4.5-5 GB of free space
+- Gemma 3 can run on a single consumer-tier dGPU
+- Gemma 3 4B IT QAT and ChromaDB running together should use about 6 GB VRAM at peak
+
+
 ## Prerequisites
 
 1. **Node.js** 
@@ -223,12 +230,6 @@ rag-chatbot/
 - **Chunk Size**: Adjust based on your use case (smaller = more precise, larger = more context)
 - **Cache Expiry**: Longer expiry reduces API calls but may use stale data
 - **Search Templates**: Customize templates for your specific domain
-
-## System Requirements
-
-- The models need about 4.5-5 GB of free space
-- Gemma 3 can run on a single consumer-tier dGPU
-- Gemma 3 4B IT QAT and ChromaDB running together should use about 6 GB VRAM at peak
 
 
 ## License
